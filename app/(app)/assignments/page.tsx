@@ -1,9 +1,10 @@
 'use client';
 
 import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase-client';
 import { useAuth } from '@/lib/auth-context';
-import type { Training, Course, Driver, TrainingStatus, DriverRatingBand } from '@/lib/database-types';
+import type { Training, Course, Driver, TrainingStatus, DriverRatingBand, Exam } from '@/lib/database-types';
 import { PageHeader } from '@/components/page-header';
 import { DataTable } from '@/components/data-table';
 import { Button } from '@/components/ui/button';
@@ -20,7 +21,7 @@ import {
 import { Label } from '@/components/ui/label';
 import {
   Plus, Zap, Download, Edit2, Trash2, CheckCircle2, Clock, AlertTriangle, XCircle,
-  GraduationCap, Bell, Filter, RefreshCw
+  GraduationCap, Bell, RefreshCw, ClipboardCheck, Play, Sparkles
 } from 'lucide-react';
 import type { ColumnDef } from '@tanstack/react-table';
 import { TRAINING_STATUS_LABELS, TRAINING_STATUS_COLORS, RATING_BAND_COLORS } from '@/lib/constants';
@@ -34,9 +35,12 @@ interface AssignmentRow extends Training {
   employee_id?: string;
   course_title?: string;
   driver_band?: DriverRatingBand;
+  exam_id?: string | null;
+  exam_title?: string | null;
 }
 
 export default function AdvancedAssignmentsPage() {
+  const router = useRouter();
   const { profile } = useAuth();
   const canEdit = ['system_admin', 'ehss_manager', 'ehss_officer', 'training_coordinator', 'branch_manager'].includes(profile?.role ?? '');
   const [rows, setRows] = useState<AssignmentRow[]>([]);
@@ -63,20 +67,32 @@ export default function AdvancedAssignmentsPage() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [{ data: t }, { data: d }, { data: c }] = await Promise.all([
+    const [{ data: t }, { data: d }, { data: c }, { data: ex }] = await Promise.all([
       supabase.from('trainings').select('*, course:courses(*), driver:drivers(*)').order('assigned_date', { ascending: false }),
       supabase.from('drivers').select('*').order('full_name'),
       supabase.from('courses').select('*').order('title'),
+      supabase.from('exams').select('id, course_id, title').eq('is_active', true),
     ]);
+
+    const examMap = new Map<string, { id: string; title: string }>();
+    (ex ?? []).forEach((e: { id: string; course_id: string | null; title: string }) => {
+      if (e.course_id) examMap.set(e.course_id, { id: e.id, title: e.title });
+    });
+
     setDrivers(d ?? []);
     setCourses(c ?? []);
-    setRows((t ?? []).map((tr: Training & { course: Course; driver: Driver }) => ({
-      ...tr,
-      driver_name: tr.driver?.full_name,
-      employee_id: tr.driver?.employee_id,
-      course_title: tr.course?.title,
-      driver_band: tr.driver?.last_rating_band,
-    })));
+    setRows((t ?? []).map((tr: Training & { course: Course; driver: Driver }) => {
+      const exam = tr.course_id ? examMap.get(tr.course_id) : null;
+      return {
+        ...tr,
+        driver_name: tr.driver?.full_name,
+        employee_id: tr.driver?.employee_id,
+        course_title: tr.course?.title,
+        driver_band: tr.driver?.last_rating_band,
+        exam_id: exam?.id ?? null,
+        exam_title: exam?.title ?? null,
+      };
+    }));
     setLoading(false);
   }, []);
 
@@ -143,6 +159,27 @@ export default function AdvancedAssignmentsPage() {
 
     toast({ title: `Status updated to ${TRAINING_STATUS_LABELS[newStatus]}` });
     load();
+  }
+
+  async function createExamForCourse(row: AssignmentRow) {
+    if (!row.course_id) return;
+    const { data: newExam, error } = await supabase.from('exams').insert({
+      title: `${row.course_title} Final Exam`,
+      description: `Evaluation exam for course: ${row.course_title}`,
+      course_id: row.course_id,
+      pass_percentage: 70,
+      time_limit_minutes: 30,
+      is_active: true,
+      randomize_questions: true,
+    }).select().single();
+
+    if (error) {
+      toast({ title: 'Failed to create exam', description: error.message, variant: 'destructive' });
+      return;
+    }
+
+    toast({ title: 'Exam created and linked!', description: 'Redirecting to add exam questions...' });
+    router.push(`/exams/${newExam.id}`);
   }
 
   async function saveTrainingStatus() {
@@ -284,6 +321,35 @@ export default function AdvancedAssignmentsPage() {
       ),
     },
     {
+      id: 'course_exam', header: 'Evaluation Exam',
+      cell: ({ row }) => {
+        if (row.original.exam_id) {
+          return (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8 text-xs gap-1 border-primary/30 text-primary hover:bg-primary/10"
+              onClick={() => router.push(`/exams/${row.original.exam_id}/take`)}
+            >
+              <Play className="h-3.5 w-3.5" /> Start Exam
+            </Button>
+          );
+        }
+        return canEdit ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-8 text-xs gap-1 text-muted-foreground hover:text-foreground"
+            onClick={() => createExamForCourse(row.original)}
+          >
+            <Sparkles className="h-3.5 w-3.5 text-amber-500" /> + Add Exam
+          </Button>
+        ) : (
+          <span className="text-xs text-muted-foreground">No Exam</span>
+        );
+      },
+    },
+    {
       accessorKey: 'due_date', header: 'Due Date',
       cell: ({ row }) => <span className={classNamesForDue(row.original.due_date)}>{formatDate(row.original.due_date)}</span>,
     },
@@ -301,10 +367,6 @@ export default function AdvancedAssignmentsPage() {
       ) : '—',
     },
     {
-      accessorKey: 'source', header: 'Source',
-      cell: ({ row }) => <Badge variant="outline" className="text-[10px] capitalize">{(row.original.source ?? 'manual').replace('_', ' ')}</Badge>,
-    },
-    {
       id: 'actions', header: 'Actions',
       cell: ({ row }) => (
         <div className="flex items-center gap-1">
@@ -319,7 +381,7 @@ export default function AdvancedAssignmentsPage() {
         </div>
       ),
     },
-  ], [canEdit]);
+  ], [canEdit, router]);
 
   if (loading) {
     return <div className="space-y-4"><Skeleton className="h-10 w-48" /><Skeleton className="h-24 w-full" /><Skeleton className="h-96 w-full" /></div>;
@@ -329,7 +391,7 @@ export default function AdvancedAssignmentsPage() {
     <div className="space-y-6">
       <PageHeader
         title="Training Assignments & Compliance"
-        description="Enterprise training status dashboard — filter by status tabs or update training status directly."
+        description="Enterprise training status dashboard — launch evaluation exams or update training status directly."
         actions={
           <div className="flex flex-wrap gap-2">
             <Button variant="outline" size="sm" onClick={() => exportToCSV(filteredRows.map((r) => ({
@@ -496,6 +558,29 @@ export default function AdvancedAssignmentsPage() {
                   ))}
                 </SelectContent>
               </Select>
+            </div>
+
+            <div>
+              <Label className="text-xs font-semibold font-mono">Evaluation Exam</Label>
+              {editRow?.exam_id ? (
+                <div className="mt-1 flex items-center justify-between rounded-lg border border-primary/20 bg-primary/5 p-2.5">
+                  <span className="text-xs font-medium text-primary flex items-center gap-1.5">
+                    <ClipboardCheck className="h-4 w-4" /> {editRow.exam_title ?? 'Course Exam'}
+                  </span>
+                  <Button size="sm" className="h-7 text-xs gap-1" onClick={() => { setEditRow(null); router.push(`/exams/${editRow.exam_id}/take`); }}>
+                    <Play className="h-3 w-3" /> Start Exam
+                  </Button>
+                </div>
+              ) : (
+                <div className="mt-1 flex items-center justify-between rounded-lg border p-2 text-xs text-muted-foreground">
+                  <span>No evaluation exam linked to this course</span>
+                  {canEdit && (
+                    <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => editRow && createExamForCourse(editRow)}>
+                      + Create Exam
+                    </Button>
+                  )}
+                </div>
+              )}
             </div>
 
             <div>
