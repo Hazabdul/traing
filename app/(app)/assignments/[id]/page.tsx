@@ -17,7 +17,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import {
   ArrowLeft, User, BookOpen, FileText, Video, Presentation, Headphones, Image as ImageIcon,
   Clock, Globe, Award, Play, Sparkles, ShieldCheck, CheckCircle2, AlertTriangle, Trash2,
-  ExternalLink, Save, Calendar, Edit2, Download
+  ExternalLink, Save, Calendar, Edit2, Download, RefreshCw, Copy, MessageCircle
 } from 'lucide-react';
 import { TRAINING_STATUS_LABELS, TRAINING_STATUS_COLORS, RATING_BAND_COLORS, MATERIAL_TYPE_LABELS } from '@/lib/constants';
 import { formatDate, classNamesForDue } from '@/lib/format';
@@ -53,11 +53,12 @@ export default function AssignmentDetailPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
-  // Form states
+  // Form & Exam states
   const [status, setStatus] = useState<TrainingStatus>('assigned');
   const [score, setScore] = useState<string>('');
   const [dueDate, setDueDate] = useState<string>('');
   const [completedDate, setCompletedDate] = useState<string>('');
+  const [attemptCount, setAttemptCount] = useState<number>(0);
 
   const load = useCallback(async () => {
     const assignmentId = params.id;
@@ -79,12 +80,22 @@ export default function AssignmentDetailPage() {
     const courseId = tr.course_id;
     const driverId = tr.driver_id;
 
-    // Parallel fetch for materials, linked exam, and certificate
+    // Parallel fetch for materials, linked exam, certificate, and attempt count
     const [{ data: mats }, { data: ex }, { data: cert }] = await Promise.all([
       courseId ? supabase.from('training_materials').select('*').eq('course_id', courseId) : Promise.resolve({ data: [] }),
       courseId ? supabase.from('exams').select('*').eq('course_id', courseId).eq('is_active', true).maybeSingle() : Promise.resolve({ data: null }),
       (courseId && driverId) ? supabase.from('certificates').select('*').eq('course_id', courseId).eq('driver_id', driverId).maybeSingle() : Promise.resolve({ data: null }),
     ]);
+
+    let count = 0;
+    if (ex?.id && driverId) {
+      const { count: attCount } = await supabase
+        .from('exam_attempts')
+        .select('*', { count: 'exact', head: true })
+        .eq('driver_id', driverId)
+        .eq('exam_id', ex.id);
+      count = attCount ?? 0;
+    }
 
     const fullDetail: FullAssignmentDetail = {
       ...tr,
@@ -96,6 +107,7 @@ export default function AssignmentDetailPage() {
     };
 
     setData(fullDetail);
+    setAttemptCount(count);
     setStatus(tr.status);
     setScore(tr.score !== null && tr.score !== undefined ? String(tr.score) : '');
     setDueDate(tr.due_date ?? '');
@@ -104,6 +116,20 @@ export default function AssignmentDetailPage() {
   }, [params.id, toast]);
 
   useEffect(() => { load(); }, [load]);
+
+  function copyExamShareLink() {
+    if (!data?.exam) return;
+    const url = `${window.location.origin}/exams/${data.exam.id}/take`;
+    navigator.clipboard.writeText(url);
+    toast({ title: 'Shareable link copied!', description: 'Exam link copied to clipboard.' });
+  }
+
+  function shareExamWhatsApp() {
+    if (!data?.exam) return;
+    const url = `${window.location.origin}/exams/${data.exam.id}/take`;
+    const message = `📋 Evaluation Exam: ${data.exam.title}\n\nPlease click the link below to complete your evaluation exam:\n${url}`;
+    window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(message)}`, '_blank');
+  }
 
   async function saveAssignment() {
     if (!data) return;
@@ -386,22 +412,50 @@ export default function AssignmentDetailPage() {
               </div>
 
               <div>
-                <Label className="text-xs font-semibold">Evaluation Exam</Label>
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs font-semibold">Evaluation Exam</Label>
+                  {attemptCount > 0 && (
+                    <span className="text-[10px] font-bold text-primary bg-primary/10 px-2 py-0.5 rounded">
+                      Attended: {attemptCount} time{attemptCount > 1 ? 's' : ''}
+                    </span>
+                  )}
+                </div>
                 {exam ? (
                   <div className="mt-1 space-y-2">
-                    <div className="rounded-lg border border-primary/20 bg-primary/5 p-2.5 text-xs">
+                    <div className="rounded-lg border border-primary/20 bg-primary/5 p-2.5 text-xs space-y-1">
                       <p className="font-bold text-primary flex items-center gap-1">
-                        <Sparkles className="h-3.5 w-3.5" /> {exam.title}
+                        <Sparkles className="h-3.5 w-3.5 text-amber-500" /> {exam.title}
                       </p>
-                      <p className="text-[10px] text-muted-foreground mt-0.5">Pass mark: {exam.pass_percentage}% · Time: {exam.time_limit_minutes ?? 30}m</p>
+                      <p className="text-[10px] text-muted-foreground">Pass mark: {exam.pass_percentage}% · Time: {exam.time_limit_minutes ?? 30}m</p>
                     </div>
-                    <Button
-                      size="sm"
-                      className="w-full text-xs gap-1.5 shadow-xs"
-                      onClick={() => router.push(`/exams/${exam.id}/take`)}
-                    >
-                      <Play className="h-3.5 w-3.5" /> Take Exam
-                    </Button>
+
+                    <div className="grid grid-cols-1 gap-2">
+                      <Button
+                        size="sm"
+                        variant={attemptCount > 0 ? "outline" : "default"}
+                        className="w-full text-xs gap-1.5 shadow-xs"
+                        onClick={() => router.push(`/exams/${exam.id}/take`)}
+                      >
+                        {attemptCount > 0 ? (
+                          <>
+                            <RefreshCw className="h-3.5 w-3.5 text-primary" /> Retake Evaluation Exam
+                          </>
+                        ) : (
+                          <>
+                            <Play className="h-3.5 w-3.5" /> Start Exam
+                          </>
+                        )}
+                      </Button>
+
+                      <div className="flex gap-2">
+                        <Button variant="outline" size="sm" onClick={copyExamShareLink} className="flex-1 text-[11px] h-7 gap-1">
+                          <Copy className="h-3 w-3" /> Copy Link
+                        </Button>
+                        <Button variant="default" size="sm" onClick={shareExamWhatsApp} className="flex-1 text-[11px] h-7 gap-1 bg-emerald-600 hover:bg-emerald-700 text-white">
+                          <MessageCircle className="h-3 w-3" /> WhatsApp
+                        </Button>
+                      </div>
+                    </div>
                   </div>
                 ) : (
                   <div className="mt-1 space-y-2">

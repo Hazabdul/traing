@@ -18,7 +18,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
 } from '@/components/ui/dialog';
-import { ClipboardCheck, Clock, CheckCircle2, XCircle, Play, Plus, Settings } from 'lucide-react';
+import { ClipboardCheck, Clock, CheckCircle2, XCircle, Play, Plus, Settings, Copy, MessageCircle } from 'lucide-react';
 import { formatDateTime } from '@/lib/format';
 import { useToast } from '@/hooks/use-toast';
 import { logAudit } from '@/lib/audit';
@@ -155,14 +155,31 @@ export default function ExamsPage() {
                     <span className="flex items-center gap-1"><Clock className="h-3 w-3" /> {ex.time_limit_minutes ?? 30} min</span>
                     <span className="flex items-center gap-1"><CheckCircle2 className="h-3 w-3" /> Pass {ex.pass_percentage}%</span>
                   </div>
-                  <div className="mt-auto pt-2">
+                  <div className="mt-4 space-y-2">
+                    <div className="flex gap-2">
+                      <Button variant="outline" size="sm" className="flex-1 text-xs gap-1" onClick={() => {
+                        const url = `${window.location.origin}/exams/${ex.id}/take`;
+                        navigator.clipboard.writeText(url);
+                        toast({ title: 'Shareable link copied!', description: 'Exam URL copied to clipboard.' });
+                      }}>
+                        <Copy className="h-3.5 w-3.5" /> Copy Link
+                      </Button>
+                      <Button variant="default" size="sm" className="flex-1 text-xs gap-1 bg-emerald-600 hover:bg-emerald-700 text-white" onClick={() => {
+                        const url = `${window.location.origin}/exams/${ex.id}/take`;
+                        const msg = `📋 SafeFleet Evaluation Exam: ${ex.title}\n\nPlease click the link to start your exam:\n${url}`;
+                        window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(msg)}`, '_blank');
+                      }}>
+                        <MessageCircle className="h-3.5 w-3.5" /> WhatsApp
+                      </Button>
+                    </div>
+
                     {!staff ? (
                       <Button size="sm" className="w-full gap-1" onClick={() => startExam(ex.id)} disabled={ex.questionCount === 0 || !ex.is_active}>
                         <Play className="h-4 w-4" /> Start Exam
                       </Button>
                     ) : (
-                      <Button size="sm" variant="outline" className="w-full gap-1" onClick={() => router.push(`/exams/${ex.id}`)}>
-                        <Settings className="h-4 w-4" /> Manage Exam
+                      <Button size="sm" variant="outline" className="w-full gap-1 border-primary/30 text-primary hover:bg-primary/10" onClick={() => router.push(`/exams/${ex.id}`)}>
+                        <Settings className="h-4 w-4" /> Manage Exam Configuration
                       </Button>
                     )}
                   </div>

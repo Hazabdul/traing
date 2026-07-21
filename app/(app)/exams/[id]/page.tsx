@@ -1,10 +1,10 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase-client';
 import { useAuth, isStaff } from '@/lib/auth-context';
-import type { Exam, Course, Question } from '@/lib/database-types';
+import type { Exam, Course, Question, QuestionType, DifficultyLevel } from '@/lib/database-types';
 import { PageHeader } from '@/components/page-header';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -18,7 +18,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
 } from '@/components/ui/dialog';
-import { ArrowLeft, Plus, Trash2, HelpCircle, Save, CheckCircle2, Clock } from 'lucide-react';
+import { ArrowLeft, Plus, Trash2, HelpCircle, Save, CheckCircle2, Clock, Share2, Copy, MessageCircle, ExternalLink } from 'lucide-react';
 import { QUESTION_TYPE_LABELS, DIFFICULTY_LABELS } from '@/lib/constants';
 import { useToast } from '@/hooks/use-toast';
 import { logAudit } from '@/lib/audit';
@@ -38,7 +38,10 @@ export default function ManageExamPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [addDialogOpen, setAddDialogOpen] = useState(false);
-  const [selectedQId, setSelectedQId] = useState('');
+
+  // Multi-select question states
+  const [selectedQIds, setSelectedQIds] = useState<string[]>([]);
+  const [qSearch, setQSearch] = useState('');
 
   // Form states
   const [title, setTitle] = useState('');
@@ -46,8 +49,31 @@ export default function ManageExamPage() {
   const [courseId, setCourseId] = useState('');
   const [passPercentage, setPassPercentage] = useState('70');
   const [timeLimit, setTimeLimit] = useState('30');
+  const [validDays, setValidDays] = useState('30');
   const [isActive, setIsActive] = useState(true);
-  const [randomize, setRandomize] = useState(false);
+  const [randomize, setRandomize] = useState(true);
+
+  const filteredAvailableQuestions = useMemo(() => {
+    return availableQuestions.filter((q) =>
+      q.question_text.toLowerCase().includes(qSearch.toLowerCase()) ||
+      (q.category ?? '').toLowerCase().includes(qSearch.toLowerCase()) ||
+      q.difficulty.toLowerCase().includes(qSearch.toLowerCase())
+    );
+  }, [availableQuestions, qSearch]);
+
+  function toggleQuestionSelect(qId: string) {
+    setSelectedQIds((prev) =>
+      prev.includes(qId) ? prev.filter((id) => id !== qId) : [...prev, qId]
+    );
+  }
+
+  function selectAllQuestions() {
+    setSelectedQIds(filteredAvailableQuestions.map((q) => q.id));
+  }
+
+  function clearQuestionSelection() {
+    setSelectedQIds([]);
+  }
 
   const load = useCallback(async () => {
     const examId = params.id;
@@ -88,6 +114,20 @@ export default function ManageExamPage() {
     load();
   }, [profile, staff, router, load]);
 
+  function copyShareableLink() {
+    if (!exam) return;
+    const url = `${window.location.origin}/exams/${exam.id}/take`;
+    navigator.clipboard.writeText(url);
+    toast({ title: 'Link copied to clipboard!', description: 'Drivers can use this link to take the exam.' });
+  }
+
+  function shareOnWhatsApp() {
+    if (!exam) return;
+    const url = `${window.location.origin}/exams/${exam.id}/take`;
+    const message = `📋 SafeFleet Evaluation Exam: ${exam.title}\n\nPlease click the link below to take your assigned evaluation exam:\n${url}`;
+    window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(message)}`, '_blank');
+  }
+
   async function saveExamDetails() {
     if (!exam) return;
     if (!title.trim()) {
@@ -118,20 +158,21 @@ export default function ManageExamPage() {
     load();
   }
 
-  async function addQuestionToExam() {
-    if (!exam || !selectedQId) return;
+  async function addQuestionsToExam() {
+    if (!exam || selectedQIds.length === 0) return;
 
-    const nextOrder = attachedQuestions.length + 1;
-    const { error } = await addQuestionToExamRecord(exam.id, selectedQId, nextOrder);
-
-    if (error) {
-      toast({ title: 'Failed to add question', description: error.message, variant: 'destructive' });
-      return;
+    let addedCount = 0;
+    for (let i = 0; i < selectedQIds.length; i++) {
+      const qId = selectedQIds[i];
+      const nextOrder = attachedQuestions.length + i + 1;
+      const { error } = await addQuestionToExamRecord(exam.id, qId, nextOrder);
+      if (!error) addedCount++;
     }
 
-    toast({ title: 'Question added to exam' });
-    setSelectedQId('');
+    toast({ title: 'Questions Added', description: `Successfully attached ${addedCount} question(s) to exam.` });
+    setSelectedQIds([]);
     setAddDialogOpen(false);
+    setQSearch('');
     load();
   }
 
@@ -172,7 +213,17 @@ export default function ManageExamPage() {
 
       <PageHeader
         title={`Manage Exam: ${exam.title}`}
-        description="Configure exam settings, pass thresholds, and attach questions."
+        description="Configure exam settings, pass thresholds, share links, and attach questions."
+        actions={
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" size="sm" onClick={copyShareableLink} className="gap-1.5">
+              <Copy className="h-4 w-4" /> Copy Share Link
+            </Button>
+            <Button variant="default" size="sm" onClick={shareOnWhatsApp} className="gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs">
+              <MessageCircle className="h-4 w-4" /> Share to WhatsApp
+            </Button>
+          </div>
+        }
       />
 
       <div className="grid gap-6 md:grid-cols-3">
@@ -256,13 +307,13 @@ export default function ManageExamPage() {
               <CardDescription>Questions assigned to this exam attempt.</CardDescription>
             </div>
             <Button size="sm" onClick={() => setAddDialogOpen(true)} className="gap-1">
-              <Plus className="h-4 w-4" /> Add Question
+              <Plus className="h-4 w-4" /> Add Questions ({availableQuestions.length} available)
             </Button>
           </CardHeader>
           <CardContent className="space-y-3">
             {attachedQuestions.length === 0 ? (
               <p className="py-12 text-center text-sm text-muted-foreground">
-                No questions added to this exam yet. Click "Add Question" to select from the Question Bank.
+                No questions added to this exam yet. Click "Add Questions" to select multiple items from the Question Bank.
               </p>
             ) : (
               attachedQuestions.map((q, idx) => (
@@ -293,37 +344,81 @@ export default function ManageExamPage() {
         </Card>
       </div>
 
-      {/* Add Question Dialog */}
+      {/* Multi-Select Add Questions Dialog */}
       <Dialog open={addDialogOpen} onOpenChange={setAddDialogOpen}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Add Question from Bank</DialogTitle>
-            <DialogDescription>Select an existing question to attach to this exam.</DialogDescription>
+            <DialogTitle>Add Questions from Bank</DialogTitle>
+            <DialogDescription>
+              Select single or multiple questions from your question bank to attach to this exam.
+            </DialogDescription>
           </DialogHeader>
-          <div className="space-y-4 py-2">
-            <div>
-              <Label className="text-xs">Select Question</Label>
-              <Select value={selectedQId} onValueChange={setSelectedQId}>
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Choose a question..." />
-                </SelectTrigger>
-                <SelectContent className="max-h-60">
-                  {availableQuestions.length === 0 ? (
-                    <div className="p-2 text-xs text-center text-muted-foreground">No remaining questions in bank</div>
-                  ) : (
-                    availableQuestions.map((q) => (
-                      <SelectItem key={q.id} value={q.id}>
-                        {q.question_text.slice(0, 60)}... ({DIFFICULTY_LABELS[q.difficulty]})
-                      </SelectItem>
-                    ))
-                  )}
-                </SelectContent>
-              </Select>
+
+          <div className="space-y-3 py-2">
+            <div className="flex items-center justify-between">
+              <Label className="text-xs font-semibold">
+                Available Questions ({selectedQIds.length} of {availableQuestions.length} selected)
+              </Label>
+              <div className="flex gap-2">
+                <Button variant="ghost" size="sm" onClick={selectAllQuestions} className="h-6 text-[11px] px-2 text-primary">
+                  Select All ({filteredAvailableQuestions.length})
+                </Button>
+                {selectedQIds.length > 0 && (
+                  <Button variant="ghost" size="sm" onClick={clearQuestionSelection} className="h-6 text-[11px] px-2 text-muted-foreground">
+                    Clear
+                  </Button>
+                )}
+              </div>
+            </div>
+
+            <Input
+              placeholder="Search questions by text, category, or difficulty..."
+              value={qSearch}
+              onChange={(e) => setQSearch(e.target.value)}
+              className="h-8 text-xs"
+            />
+
+            <div className="max-h-60 overflow-y-auto rounded-lg border bg-card p-2 space-y-2">
+              {filteredAvailableQuestions.length === 0 ? (
+                <p className="text-xs text-muted-foreground py-6 text-center">No matching questions available in bank.</p>
+              ) : (
+                filteredAvailableQuestions.map((q) => {
+                  const isChecked = selectedQIds.includes(q.id);
+                  return (
+                    <div
+                      key={q.id}
+                      onClick={() => toggleQuestionSelect(q.id)}
+                      className={`flex items-start gap-3 p-2.5 rounded-lg border text-xs cursor-pointer transition-colors ${
+                        isChecked ? 'bg-primary/10 border-primary/40' : 'hover:bg-muted'
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        onChange={() => {}}
+                        className="mt-0.5 h-4 w-4 rounded border-gray-300 text-primary accent-primary shrink-0"
+                      />
+                      <div className="min-w-0 flex-1 space-y-1">
+                        <div className="flex items-center gap-2">
+                          <Badge variant="outline" className="text-[9px]">{QUESTION_TYPE_LABELS[q.question_type]}</Badge>
+                          <Badge variant="secondary" className="text-[9px]">{DIFFICULTY_LABELS[q.difficulty]}</Badge>
+                        </div>
+                        <p className="font-medium text-foreground leading-snug">{q.question_text}</p>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
             </div>
           </div>
-          <DialogFooter>
+
+          <DialogFooter className="pt-2">
             <Button variant="outline" onClick={() => setAddDialogOpen(false)}>Cancel</Button>
-            <Button onClick={addQuestionToExam} disabled={!selectedQId}>Add to Exam</Button>
+            <Button onClick={addQuestionsToExam} disabled={selectedQIds.length === 0}>
+              {selectedQIds.length > 0
+                ? `Add ${selectedQIds.length} Question(s) to Exam`
+                : 'Add Questions'}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

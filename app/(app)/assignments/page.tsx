@@ -43,6 +43,7 @@ interface AssignmentRow extends Training {
   driver?: Driver;
   materials?: TrainingMaterial[];
   certificate?: Certificate | null;
+  attempt_count?: number;
 }
 
 const MATERIAL_ICONS: Record<string, typeof FileText> = {
@@ -83,11 +84,12 @@ export default function AdvancedAssignmentsPage() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [{ data: t }, { data: d }, { data: c }, { data: ex }] = await Promise.all([
+    const [{ data: t }, { data: d }, { data: c }, { data: ex }, { data: attempts }] = await Promise.all([
       supabase.from('trainings').select('*, course:courses(*), driver:drivers(*)').order('assigned_date', { ascending: false }),
       supabase.from('drivers').select('*').order('full_name'),
       supabase.from('courses').select('*').order('title'),
       supabase.from('exams').select('id, course_id, title').eq('is_active', true),
+      supabase.from('exam_attempts').select('driver_id, exam_id'),
     ]);
 
     const examMap = new Map<string, { id: string; title: string }>();
@@ -95,10 +97,18 @@ export default function AdvancedAssignmentsPage() {
       if (e.course_id) examMap.set(e.course_id, { id: e.id, title: e.title });
     });
 
+    const attemptsMap = new Map<string, number>();
+    (attempts ?? []).forEach((a: { driver_id: string; exam_id: string }) => {
+      const key = `${a.driver_id}_${a.exam_id}`;
+      attemptsMap.set(key, (attemptsMap.get(key) ?? 0) + 1);
+    });
+
     setDrivers(d ?? []);
     setCourses(c ?? []);
     setRows((t ?? []).map((tr: Training & { course: Course; driver: Driver }) => {
       const exam = tr.course_id ? examMap.get(tr.course_id) : null;
+      const count = (tr.driver_id && exam?.id) ? (attemptsMap.get(`${tr.driver_id}_${exam.id}`) ?? 0) : 0;
+
       return {
         ...tr,
         driver_name: tr.driver?.full_name,
@@ -107,6 +117,7 @@ export default function AdvancedAssignmentsPage() {
         driver_band: tr.driver?.last_rating_band,
         exam_id: exam?.id ?? null,
         exam_title: exam?.title ?? null,
+        attempt_count: count,
       };
     }));
     setLoading(false);
@@ -368,16 +379,35 @@ export default function AdvancedAssignmentsPage() {
     {
       id: 'course_exam', header: 'Evaluation Exam',
       cell: ({ row }) => {
+        const attempts = row.original.attempt_count ?? 0;
+        const isDone = row.original.status === 'completed';
         if (row.original.exam_id) {
           return (
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-8 text-xs gap-1 border-primary/30 text-primary hover:bg-primary/10"
-              onClick={() => router.push(`/exams/${row.original.exam_id}/take`)}
-            >
-              <Play className="h-3.5 w-3.5" /> Start Exam
-            </Button>
+            <div className="flex flex-col gap-1 items-start">
+              <Button
+                size="sm"
+                variant={isDone || attempts > 0 ? "outline" : "default"}
+                className={`h-8 text-xs gap-1 ${isDone || attempts > 0 ? 'border-primary/40 text-primary hover:bg-primary/10' : 'shadow-xs'}`}
+                onClick={() => router.push(`/exams/${row.original.exam_id}/take`)}
+              >
+                {attempts > 0 || isDone ? (
+                  <>
+                    <RefreshCw className="h-3.5 w-3.5 text-primary" /> Retake Exam
+                  </>
+                ) : (
+                  <>
+                    <Play className="h-3.5 w-3.5" /> Start Exam
+                  </>
+                )}
+              </Button>
+              {attempts > 0 ? (
+                <span className="text-[10px] font-semibold text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
+                  Attended: {attempts} time{attempts > 1 ? 's' : ''}
+                </span>
+              ) : (
+                <span className="text-[10px] text-muted-foreground">Not taken yet</span>
+              )}
+            </div>
           );
         }
         return canEdit ? (
