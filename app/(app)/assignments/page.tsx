@@ -12,11 +12,16 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { DatePicker } from '@/components/date-picker';
+import { Card, CardContent } from '@/components/ui/card';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
 } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
-import { Plus, Zap, Download, Edit2, Trash2 } from 'lucide-react';
+import {
+  Plus, Zap, Download, Edit2, Trash2, CheckCircle2, Clock, AlertTriangle, XCircle,
+  GraduationCap, Bell, Filter, RefreshCw
+} from 'lucide-react';
 import type { ColumnDef } from '@tanstack/react-table';
 import { TRAINING_STATUS_LABELS, TRAINING_STATUS_COLORS, RATING_BAND_COLORS } from '@/lib/constants';
 import { formatDate, classNamesForDue } from '@/lib/format';
@@ -31,15 +36,19 @@ interface AssignmentRow extends Training {
   driver_band?: DriverRatingBand;
 }
 
-export default function AssignmentsPage() {
+export default function AdvancedAssignmentsPage() {
   const { profile } = useAuth();
-  const canEdit = ['system_admin', 'ehss_manager', 'ehss_officer', 'training_coordinator'].includes(profile?.role ?? '');
+  const canEdit = ['system_admin', 'ehss_manager', 'ehss_officer', 'training_coordinator', 'branch_manager'].includes(profile?.role ?? '');
   const [rows, setRows] = useState<AssignmentRow[]>([]);
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [courses, setCourses] = useState<Course[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Tab & Filters state
+  const [activeTab, setActiveTab] = useState('all');
   const [globalFilter, setGlobalFilter] = useState('');
-  const [statusFilter, setStatusFilter] = useState('all');
+  const [bandFilter, setBandFilter] = useState('all');
+  const [courseFilter, setCourseFilter] = useState('all');
   const [assignOpen, setAssignOpen] = useState(false);
 
   // Edit status modal state
@@ -73,7 +82,35 @@ export default function AssignmentsPage() {
 
   useEffect(() => { load(); }, [load]);
 
-  const filtered = useMemo(() => rows.filter((r) => statusFilter === 'all' || r.status === statusFilter), [rows, statusFilter]);
+  // Statistics
+  const stats = useMemo(() => {
+    const total = rows.length;
+    const completed = rows.filter((r) => r.status === 'completed').length;
+    const pending = rows.filter((r) => r.status === 'assigned' || r.status === 'in_progress').length;
+    const overdue = rows.filter((r) => r.status === 'overdue' || r.status === 'expired').length;
+    const failed = rows.filter((r) => r.status === 'failed').length;
+    const rate = total > 0 ? Math.round((completed / total) * 100) : 0;
+    return { total, completed, pending, overdue, failed, rate };
+  }, [rows]);
+
+  // Filter rows based on active Tab and selected filters
+  const filteredRows = useMemo(() => {
+    return rows.filter((r) => {
+      // Tab filter
+      if (activeTab === 'pending' && !(r.status === 'assigned' || r.status === 'in_progress')) return false;
+      if (activeTab === 'overdue' && !(r.status === 'overdue' || r.status === 'expired')) return false;
+      if (activeTab === 'completed' && r.status !== 'completed') return false;
+      if (activeTab === 'failed' && r.status !== 'failed') return false;
+
+      // Rating band filter
+      if (bandFilter !== 'all' && r.driver_band !== bandFilter) return false;
+
+      // Course filter
+      if (courseFilter !== 'all' && r.course_id !== courseFilter) return false;
+
+      return true;
+    });
+  }, [rows, activeTab, bandFilter, courseFilter]);
 
   function openEditModal(row: AssignmentRow) {
     setEditRow(row);
@@ -81,6 +118,31 @@ export default function AssignmentsPage() {
     setEditScore(row.score !== null && row.score !== undefined ? String(row.score) : '');
     setEditDueDate(row.due_date ?? '');
     setEditCompletedDate(row.completed_date ?? '');
+  }
+
+  async function updateInlineStatus(row: AssignmentRow, newStatus: TrainingStatus) {
+    const isCompleted = newStatus === 'completed';
+    const compDate = isCompleted ? new Date().toISOString().slice(0, 10) : (newStatus === 'assigned' || newStatus === 'in_progress' ? null : row.completed_date);
+
+    const { error } = await supabase
+      .from('trainings')
+      .update({
+        status: newStatus,
+        completed_date: compDate,
+      })
+      .eq('id', row.id);
+
+    if (error) {
+      toast({ title: 'Failed to update status', description: error.message, variant: 'destructive' });
+      return;
+    }
+
+    await logAudit('status_change', 'training', `Changed training status for ${row.driver_name} to ${newStatus}`, {
+      status: newStatus,
+    }, row.driver_id);
+
+    toast({ title: `Status updated to ${TRAINING_STATUS_LABELS[newStatus]}` });
+    load();
   }
 
   async function saveTrainingStatus() {
@@ -137,7 +199,6 @@ export default function AssignmentsPage() {
 
     for (const drv of drivers) {
       if (drv.status !== 'active') continue;
-      const band = drv.last_rating_band;
       const { data: candidates } = await supabase
         .from('courses')
         .select('id, title')
@@ -165,23 +226,61 @@ export default function AssignmentsPage() {
     load();
   }
 
+  async function sendOverdueReminders() {
+    const overdueRows = rows.filter((r) => r.status === 'overdue' || r.status === 'expired');
+    if (overdueRows.length === 0) {
+      toast({ title: 'No overdue trainings', description: 'All drivers are up to date!' });
+      return;
+    }
+    let count = 0;
+    for (const r of overdueRows) {
+      const { data: prof } = await supabase.from('profiles').select('user_id').eq('driver_id', r.driver_id).maybeSingle();
+      if (prof?.user_id) {
+        await supabase.from('notifications').insert({
+          user_id: prof.user_id,
+          driver_id: r.driver_id,
+          channel: 'in_app',
+          title: 'OVERDUE TRAINING ALERT',
+          body: `Your training "${r.course_title}" is overdue. Please complete it as soon as possible.`,
+        });
+        count++;
+      }
+    }
+    toast({ title: 'Reminders Sent', description: `Sent notification alerts to ${count} drivers.` });
+  }
+
   const columns: ColumnDef<AssignmentRow>[] = useMemo(() => [
     {
       accessorKey: 'driver_name', header: 'Driver',
       cell: ({ row }) => (
         <div>
-          <p className="font-medium">{row.original.driver_name ?? '—'}</p>
+          <p className="font-medium text-foreground">{row.original.driver_name ?? '—'}</p>
           <p className="text-xs text-muted-foreground">{row.original.employee_id}</p>
         </div>
       ),
     },
-    { accessorKey: 'course_title', header: 'Course' },
     {
-      accessorKey: 'status', header: 'Status',
+      accessorKey: 'course_title', header: 'Course',
+      cell: ({ row }) => <span className="font-medium text-sm">{row.original.course_title}</span>,
+    },
+    {
+      accessorKey: 'status', header: 'Status & Change',
       cell: ({ row }) => (
-        <Badge variant="secondary" className={TRAINING_STATUS_COLORS[row.original.status]}>
-          {TRAINING_STATUS_LABELS[row.original.status]}
-        </Badge>
+        <Select
+          value={row.original.status}
+          onValueChange={(val) => updateInlineStatus(row.original, val as TrainingStatus)}
+        >
+          <SelectTrigger className="h-8 w-[145px] text-xs font-semibold border-border/60">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {(Object.keys(TRAINING_STATUS_LABELS) as TrainingStatus[]).map((st) => (
+              <SelectItem key={st} value={st} className="text-xs">
+                {TRAINING_STATUS_LABELS[st]}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       ),
     },
     {
@@ -191,12 +290,14 @@ export default function AssignmentsPage() {
     { accessorKey: 'completed_date', header: 'Completed', cell: ({ row }) => <span className="text-muted-foreground">{formatDate(row.original.completed_date)}</span> },
     {
       accessorKey: 'score', header: 'Score',
-      cell: ({ row }) => <span className="tabular-nums font-medium">{row.original.score !== null && row.original.score !== undefined ? `${row.original.score}%` : '—'}</span>,
+      cell: ({ row }) => <span className="tabular-nums font-bold">{row.original.score !== null && row.original.score !== undefined ? `${row.original.score}%` : '—'}</span>,
     },
     {
-      id: 'band', header: 'Rating',
+      id: 'band', header: 'Rating Band',
       cell: ({ row }) => row.original.driver_band ? (
-        <span className="text-xs font-medium" style={{ color: RATING_BAND_COLORS[row.original.driver_band as DriverRatingBand] }}>{row.original.driver_band}</span>
+        <span className="text-xs font-bold px-2 py-0.5 rounded" style={{ backgroundColor: `${RATING_BAND_COLORS[row.original.driver_band as DriverRatingBand]}20`, color: RATING_BAND_COLORS[row.original.driver_band as DriverRatingBand] }}>
+          {row.original.driver_band}
+        </span>
       ) : '—',
     },
     {
@@ -207,11 +308,9 @@ export default function AssignmentsPage() {
       id: 'actions', header: 'Actions',
       cell: ({ row }) => (
         <div className="flex items-center gap-1">
-          {canEdit && (
-            <Button size="sm" variant="ghost" className="h-8 w-8 p-0" onClick={() => openEditModal(row.original)} title="Change Status / Edit">
-              <Edit2 className="h-4 w-4" />
-            </Button>
-          )}
+          <Button size="sm" variant="outline" className="h-8 text-xs gap-1" onClick={() => openEditModal(row.original)}>
+            <Edit2 className="h-3.5 w-3.5" /> Details
+          </Button>
           {canEdit && (
             <Button size="sm" variant="ghost" className="h-8 w-8 p-0 text-destructive hover:text-destructive" onClick={() => deleteAssignment(row.original.id, row.original.driver_name)} title="Delete Assignment">
               <Trash2 className="h-4 w-4" />
@@ -223,48 +322,163 @@ export default function AssignmentsPage() {
   ], [canEdit]);
 
   if (loading) {
-    return <div className="space-y-4"><Skeleton className="h-10 w-48" /><Skeleton className="h-10 w-full" /><Skeleton className="h-96 w-full" /></div>;
+    return <div className="space-y-4"><Skeleton className="h-10 w-48" /><Skeleton className="h-24 w-full" /><Skeleton className="h-96 w-full" /></div>;
   }
 
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Training Assignments"
-        description={`${rows.length} training records`}
+        title="Training Assignments & Compliance"
+        description="Enterprise training status dashboard — filter by status tabs or update training status directly."
         actions={
-          <div className="flex gap-2">
-            <Button variant="outline" size="sm" onClick={() => exportToCSV(rows.map((r) => ({
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" size="sm" onClick={() => exportToCSV(filteredRows.map((r) => ({
               Driver: r.driver_name, EmployeeID: r.employee_id, Course: r.course_title,
               Status: TRAINING_STATUS_LABELS[r.status], DueDate: formatDate(r.due_date),
               Completed: formatDate(r.completed_date), Score: r.score ?? '', Source: r.source,
             })), 'assignments.csv')} className="gap-1">
               <Download className="h-4 w-4" /> Export
             </Button>
+            {canEdit && (
+              <Button variant="outline" size="sm" onClick={sendOverdueReminders} className="gap-1 text-amber-600 border-amber-300 hover:bg-amber-50 dark:text-amber-400">
+                <Bell className="h-4 w-4" /> Send Overdue Alerts
+              </Button>
+            )}
             {canEdit && <Button variant="outline" size="sm" onClick={runAutoEngine} className="gap-1"><Zap className="h-4 w-4" /> Auto-Assign</Button>}
-            {canEdit && <Button size="sm" onClick={() => setAssignOpen(true)} className="gap-1"><Plus className="h-4 w-4" /> Assign</Button>}
+            {canEdit && <Button size="sm" onClick={() => setAssignOpen(true)} className="gap-1"><Plus className="h-4 w-4" /> Assign Course</Button>}
           </div>
         }
       />
 
-      <Select value={statusFilter} onValueChange={setStatusFilter}>
-        <SelectTrigger className="w-[160px] h-9"><SelectValue placeholder="Status" /></SelectTrigger>
-        <SelectContent>
-          <SelectItem value="all">All Statuses</SelectItem>
-          {(Object.keys(TRAINING_STATUS_LABELS) as TrainingStatus[]).map((s) => <SelectItem key={s} value={s}>{TRAINING_STATUS_LABELS[s]}</SelectItem>)}
-        </SelectContent>
-      </Select>
+      {/* KPI Overview Cards */}
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+        <Card className="border-border/60 shadow-sm">
+          <CardContent className="p-4 flex items-center justify-between">
+            <div>
+              <p className="text-xs font-semibold text-muted-foreground">Total Assigned</p>
+              <p className="text-2xl font-bold tracking-tight text-foreground">{stats.total}</p>
+            </div>
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
+              <GraduationCap className="h-5 w-5" />
+            </div>
+          </CardContent>
+        </Card>
 
-      <DataTable columns={columns} data={filtered} globalFilter={globalFilter} onGlobalFilterChange={setGlobalFilter} searchPlaceholder="Search by driver or course…" />
+        <Card className="border-border/60 shadow-sm">
+          <CardContent className="p-4 flex items-center justify-between">
+            <div>
+              <p className="text-xs font-semibold text-muted-foreground">Pending / In-Progress</p>
+              <p className="text-2xl font-bold tracking-tight text-amber-600 dark:text-amber-400">{stats.pending}</p>
+            </div>
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-500/10 text-amber-600">
+              <Clock className="h-5 w-5" />
+            </div>
+          </CardContent>
+        </Card>
 
+        <Card className="border-border/60 shadow-sm">
+          <CardContent className="p-4 flex items-center justify-between">
+            <div>
+              <p className="text-xs font-semibold text-muted-foreground">Completed ({stats.rate}%)</p>
+              <p className="text-2xl font-bold tracking-tight text-emerald-600 dark:text-emerald-400">{stats.completed}</p>
+            </div>
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-600">
+              <CheckCircle2 className="h-5 w-5" />
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="border-border/60 shadow-sm">
+          <CardContent className="p-4 flex items-center justify-between">
+            <div>
+              <p className="text-xs font-semibold text-muted-foreground">Overdue / Expired</p>
+              <p className="text-2xl font-bold tracking-tight text-destructive">{stats.overdue}</p>
+            </div>
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
+              <AlertTriangle className="h-5 w-5" />
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Tabs & Filters Toolbar */}
+      <Tabs defaultValue="all" value={activeTab} onValueChange={setActiveTab} className="space-y-4">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <TabsList className="flex h-auto flex-wrap gap-1 bg-muted/60 p-1">
+            <TabsTrigger value="all" className="gap-1.5 text-xs font-semibold">
+              All Assignments ({stats.total})
+            </TabsTrigger>
+            <TabsTrigger value="pending" className="gap-1.5 text-xs font-semibold">
+              <Clock className="h-3.5 w-3.5 text-amber-500" />
+              Pending ({stats.pending})
+            </TabsTrigger>
+            <TabsTrigger value="overdue" className="gap-1.5 text-xs font-semibold">
+              <AlertTriangle className="h-3.5 w-3.5 text-destructive" />
+              Overdue ({stats.overdue})
+            </TabsTrigger>
+            <TabsTrigger value="completed" className="gap-1.5 text-xs font-semibold">
+              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
+              Completed ({stats.completed})
+            </TabsTrigger>
+            <TabsTrigger value="failed" className="gap-1.5 text-xs font-semibold">
+              <XCircle className="h-3.5 w-3.5 text-rose-500" />
+              Failed ({stats.failed})
+            </TabsTrigger>
+          </TabsList>
+
+          {/* Secondary Filters */}
+          <div className="flex flex-wrap items-center gap-2">
+            <Select value={bandFilter} onValueChange={setBandFilter}>
+              <SelectTrigger className="w-[140px] h-9 text-xs"><SelectValue placeholder="Rating Band" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Rating Bands</SelectItem>
+                <SelectItem value="D1">D1 - Top Performer</SelectItem>
+                <SelectItem value="D2">D2 - Good</SelectItem>
+                <SelectItem value="D3">D3 - Needs Work</SelectItem>
+                <SelectItem value="D4">D4 - High Risk</SelectItem>
+              </SelectContent>
+            </Select>
+
+            <Select value={courseFilter} onValueChange={setCourseFilter}>
+              <SelectTrigger className="w-[180px] h-9 text-xs"><SelectValue placeholder="Course Filter" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Courses</SelectItem>
+                {courses.map((c) => (
+                  <SelectItem key={c.id} value={c.id}>{c.title}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            {(bandFilter !== 'all' || courseFilter !== 'all') && (
+              <Button variant="ghost" size="sm" onClick={() => { setBandFilter('all'); setCourseFilter('all'); }} className="h-9 text-xs gap-1">
+                <RefreshCw className="h-3.5 w-3.5" /> Reset Filters
+              </Button>
+            )}
+          </div>
+        </div>
+
+        {/* Tab Content Tables */}
+        <TabsContent value={activeTab} className="mt-0 space-y-4">
+          <DataTable
+            columns={columns}
+            data={filteredRows}
+            globalFilter={globalFilter}
+            onGlobalFilterChange={setGlobalFilter}
+            searchPlaceholder="Search driver name, ID, or course title..."
+          />
+        </TabsContent>
+      </Tabs>
+
+      {/* Manual Assign Modal */}
       <ManualAssignDialog open={assignOpen} onOpenChange={setAssignOpen} drivers={drivers} courses={courses} onSaved={load} />
 
-      {/* Change Status / Edit Modal */}
+      {/* Change Status / Edit Details Modal */}
       <Dialog open={!!editRow} onOpenChange={(open) => !open && setEditRow(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Update Training Status</DialogTitle>
+            <DialogTitle>Edit Assignment Details</DialogTitle>
             <DialogDescription>
-              Update status, score, and completion dates for {editRow?.driver_name}'s assignment ({editRow?.course_title}).
+              Update status, score, due date, and completion date for {editRow?.driver_name}'s assignment ({editRow?.course_title}).
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-2">
@@ -312,7 +526,7 @@ export default function AssignmentsPage() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditRow(null)}>Cancel</Button>
             <Button onClick={saveTrainingStatus} disabled={updating}>
-              {updating ? 'Saving...' : 'Update Status'}
+              {updating ? 'Saving...' : 'Update Assignment'}
             </Button>
           </DialogFooter>
         </DialogContent>

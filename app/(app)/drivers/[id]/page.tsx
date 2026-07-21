@@ -7,7 +7,7 @@ import { useAuth, isStaff } from '@/lib/auth-context';
 import type {
   Driver, Branch, Plant, Training, Course, Accident, Violation, SafetyWarning,
   BehaviourAssessment, DriverRating, ExamAttempt, Certificate, DriverDocument,
-  AccidentSeverity, ViolationCategory, WarningCategory, BehaviourRating,
+  AccidentSeverity, ViolationCategory, WarningCategory, BehaviourRating, TrainingStatus,
 } from '@/lib/database-types';
 import { PageHeader } from '@/components/page-header';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -226,18 +226,42 @@ export default function DriverDetailPage({ params }: { params: { id: string } })
               <div className="space-y-2">
                 {trainings.length === 0 && <p className="py-6 text-center text-sm text-muted-foreground">No trainings assigned.</p>}
                 {trainings.map((t) => (
-                  <div key={t.id} className="flex items-center gap-3 rounded-lg border p-3">
+                  <div key={t.id} className="flex items-center justify-between gap-3 rounded-lg border p-3">
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-medium">{t.course?.title ?? 'Unknown course'}</p>
                       <p className="text-xs text-muted-foreground">
                         Assigned {formatDate(t.assigned_date)} · Due {formatDate(t.due_date)}
                         {t.completed_date && ` · Completed ${formatDate(t.completed_date)}`}
-                        {t.score !== null && ` · Score ${t.score}`}
+                        {t.score !== null && ` · Score ${t.score}%`}
                       </p>
                     </div>
-                    <Badge variant="secondary" className={TRAINING_STATUS_COLORS[t.status]}>
-                      {TRAINING_STATUS_LABELS[t.status]}
-                    </Badge>
+                    <div className="flex items-center gap-2">
+                      <Select
+                        value={t.status}
+                        onValueChange={async (val) => {
+                          const isComp = val === 'completed';
+                          const compDate = isComp ? new Date().toISOString().slice(0, 10) : (val === 'assigned' || val === 'in_progress' ? null : t.completed_date);
+                          const { error } = await supabase.from('trainings').update({ status: val, completed_date: compDate }).eq('id', t.id);
+                          if (error) {
+                            toast({ title: 'Failed to update status', description: error.message, variant: 'destructive' });
+                          } else {
+                            toast({ title: `Training status updated to ${TRAINING_STATUS_LABELS[val as TrainingStatus]}` });
+                            load();
+                          }
+                        }}
+                      >
+                        <SelectTrigger className="h-8 w-[140px] text-xs font-medium border-border/60">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {(Object.keys(TRAINING_STATUS_LABELS) as (keyof typeof TRAINING_STATUS_LABELS)[]).map((st) => (
+                            <SelectItem key={st} value={st} className="text-xs">
+                              {TRAINING_STATUS_LABELS[st]}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
                   </div>
                 ))}
               </div>
