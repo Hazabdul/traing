@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { supabase } from '@/lib/supabase-client';
 import { useAuth } from '@/lib/auth-context';
-import type { SystemSettings, Plant } from '@/lib/database-types';
+import type { SystemSettings, Plant, Branch } from '@/lib/database-types';
 import { PageHeader } from '@/components/page-header';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -131,6 +131,11 @@ export default function SettingsPage() {
   const [plantModalOpen, setPlantModalOpen] = useState(false);
   const [editingPlant, setEditingPlant] = useState<Plant | null>(null);
 
+  // Company Branches state
+  const [branches, setBranches] = useState<Branch[]>([]);
+  const [branchModalOpen, setBranchModalOpen] = useState(false);
+  const [editingBranch, setEditingBranch] = useState<Branch | null>(null);
+
   const [confirmTable, setConfirmTable] = useState<TableMeta | null>(null);
   const [confirmPurgeAll, setConfirmPurgeAll] = useState(false);
   const [clearing, setClearing] = useState(false);
@@ -175,14 +180,28 @@ export default function SettingsPage() {
     load();
   }
 
+  async function handleDeleteBranch(branch: Branch) {
+    if (!confirm(`Are you sure you want to delete Branch "${branch.name}" (${branch.code})?`)) return;
+    const { error } = await supabase.from('branches').delete().eq('id', branch.id);
+    if (error) {
+      toast({ title: 'Failed to delete branch', description: error.message, variant: 'destructive' });
+      return;
+    }
+    await logAudit('delete', 'branch', `Deleted branch: ${branch.name}`);
+    toast({ title: 'Company Branch deleted' });
+    load();
+  }
+
   const load = useCallback(async () => {
     setLoading(true);
-    const [{ data: sysData }, { data: pData }] = await Promise.all([
+    const [{ data: sysData }, { data: pData }, { data: bData }] = await Promise.all([
       supabase.from('system_settings').select('*').eq('id', 1).maybeSingle(),
       supabase.from('plants').select('*').order('name'),
+      supabase.from('branches').select('*').order('name'),
     ]);
     setSettings(sysData as SystemSettings | null);
     setPlants((pData ?? []) as Plant[]);
+    setBranches((bData ?? []) as Branch[]);
     setLoading(false);
   }, []);
 
@@ -327,6 +346,9 @@ export default function SettingsPage() {
           <TabsTrigger value="plants" className="gap-1.5">
             <Factory className="h-4 w-4 text-amber-500" /> Industrial Plants ({plants.length})
           </TabsTrigger>
+          <TabsTrigger value="branches" className="gap-1.5">
+            <Building2 className="h-4 w-4 text-indigo-500" /> Company Branches ({branches.length})
+          </TabsTrigger>
           <TabsTrigger value="bands" className="gap-1.5">
             <Award className="h-4 w-4 text-emerald-500" /> Rating Bands & Rules
           </TabsTrigger>
@@ -443,6 +465,79 @@ export default function SettingsPage() {
                             variant="ghost"
                             className="h-8 text-xs gap-1 text-destructive hover:bg-destructive/10"
                             onClick={() => handleDeletePlant(p)}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" /> Delete
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  ))
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Tab: Company Branches ─────────────────────────────────────── */}
+        <TabsContent value="branches">
+          <Card>
+            <CardHeader className="flex-row items-center justify-between space-y-0 pb-3">
+              <div>
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Building2 className="h-5 w-5 text-indigo-500" /> Company Branches Management
+                </CardTitle>
+                <CardDescription className="mt-1">Add, edit, or delete regional offices and operational company branches.</CardDescription>
+              </div>
+
+              {isAdmin && (
+                <Button
+                  size="sm"
+                  onClick={() => {
+                    setEditingBranch(null);
+                    setBranchModalOpen(true);
+                  }}
+                  className="gap-1 text-xs font-bold"
+                >
+                  <Plus className="h-4 w-4" /> Add Branch
+                </Button>
+              )}
+            </CardHeader>
+            <CardContent className="space-y-4 pt-2">
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
+                {branches.length === 0 ? (
+                  <p className="col-span-full py-12 text-center text-xs text-muted-foreground">No branches defined yet. Click "Add Branch" to create one.</p>
+                ) : (
+                  branches.map((b) => (
+                    <div key={b.id} className="flex flex-col justify-between rounded-xl border p-4 bg-card space-y-3 shadow-xs">
+                      <div>
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-sm font-bold text-foreground truncate">{b.name}</span>
+                          <Badge variant="outline" className="text-[10px] font-mono font-bold text-indigo-600 border-indigo-500/30 shrink-0">{b.code}</Badge>
+                        </div>
+                        <div className="mt-2 space-y-1 text-xs text-muted-foreground">
+                          {b.manager_name && <p>• Manager: <span className="font-medium text-foreground">{b.manager_name}</span></p>}
+                          {b.location && <p>• Location: <span className="font-medium text-foreground">{b.location}</span></p>}
+                        </div>
+                      </div>
+
+                      {isAdmin && (
+                        <div className="flex items-center justify-end gap-1 border-t pt-2.5">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-8 text-xs gap-1 text-muted-foreground hover:text-foreground"
+                            onClick={() => {
+                              setEditingBranch(b);
+                              setBranchModalOpen(true);
+                            }}
+                          >
+                            <Edit2 className="h-3.5 w-3.5" /> Edit
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-8 text-xs gap-1 text-destructive hover:bg-destructive/10"
+                            onClick={() => handleDeleteBranch(b)}
                           >
                             <Trash2 className="h-3.5 w-3.5" /> Delete
                           </Button>
@@ -743,6 +838,17 @@ export default function SettingsPage() {
         plant={editingPlant}
         onSaved={load}
       />
+
+      {/* Edit / Add Branch Modal */}
+      <SettingsBranchModal
+        open={branchModalOpen}
+        onOpenChange={(open) => {
+          setBranchModalOpen(open);
+          if (!open) setEditingBranch(null);
+        }}
+        branch={editingBranch}
+        onSaved={load}
+      />
     </div>
   );
 }
@@ -832,6 +938,105 @@ function SettingsPlantModal({ open, onOpenChange, plant, onSaved }: {
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
           <Button onClick={savePlant} disabled={saving}>{saving ? 'Saving...' : plant ? 'Save Changes' : 'Add Plant'}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function SettingsBranchModal({ open, onOpenChange, branch, onSaved }: {
+  open: boolean; onOpenChange: (o: boolean) => void; branch: Branch | null; onSaved: () => void;
+}) {
+  const { toast } = useToast();
+  const [saving, setSaving] = useState(false);
+  const [name, setName] = useState('');
+  const [code, setCode] = useState('');
+  const [managerName, setManagerName] = useState('');
+  const [location, setLocation] = useState('');
+
+  useEffect(() => {
+    if (branch) {
+      setName(branch.name);
+      setCode(branch.code);
+      setManagerName(branch.manager_name ?? '');
+      setLocation(branch.location ?? '');
+    } else {
+      setName(''); setCode(''); setManagerName(''); setLocation('');
+    }
+  }, [branch, open]);
+
+  async function saveBranch() {
+    if (!name.trim() || !code.trim()) {
+      toast({ title: 'Branch name and code are required', variant: 'destructive' });
+      return;
+    }
+    setSaving(true);
+
+    if (branch) {
+      const { error } = await supabase.from('branches').update({
+        name: name.trim(),
+        code: code.trim().toUpperCase(),
+        manager_name: managerName.trim() || null,
+        location: location.trim() || null,
+      }).eq('id', branch.id);
+
+      setSaving(false);
+      if (error) {
+        toast({ title: 'Failed to update branch', description: error.message, variant: 'destructive' });
+        return;
+      }
+      await logAudit('update', 'branch', `Updated branch: ${name} (${code})`, {}, branch.id);
+      toast({ title: 'Company Branch updated successfully!' });
+    } else {
+      const { error } = await supabase.from('branches').insert({
+        name: name.trim(),
+        code: code.trim().toUpperCase(),
+        manager_name: managerName.trim() || null,
+        location: location.trim() || null,
+      });
+
+      setSaving(false);
+      if (error) {
+        toast({ title: 'Failed to create branch', description: error.message, variant: 'destructive' });
+        return;
+      }
+      await logAudit('create', 'branch', `Created company branch: ${name} (${code})`);
+      toast({ title: 'Company Branch added successfully!' });
+    }
+
+    setName(''); setCode(''); setManagerName(''); setLocation('');
+    onOpenChange(false);
+    onSaved();
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{branch ? `Edit Branch: ${branch.code}` : 'Add Company Branch'}</DialogTitle>
+          <DialogDescription>Define an operational branch (e.g., Riyadh HQ, Jeddah Regional Hub).</DialogDescription>
+        </DialogHeader>
+        <div className="grid gap-3 py-2">
+          <div>
+            <Label className="text-xs font-bold">Branch Name *</Label>
+            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Riyadh Central HQ" />
+          </div>
+          <div>
+            <Label className="text-xs font-bold">Branch Code *</Label>
+            <Input value={code} onChange={(e) => setCode(e.target.value)} placeholder="e.g. RUH-01" />
+          </div>
+          <div>
+            <Label className="text-xs font-bold">Manager Name</Label>
+            <Input value={managerName} onChange={(e) => setManagerName(e.target.value)} placeholder="e.g. Ahmed Al-Mansoor" />
+          </div>
+          <div>
+            <Label className="text-xs font-bold">Location / Region</Label>
+            <Input value={location} onChange={(e) => setLocation(e.target.value)} placeholder="e.g. Central Province" />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button onClick={saveBranch} disabled={saving}>{saving ? 'Saving...' : branch ? 'Save Changes' : 'Add Branch'}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
