@@ -213,6 +213,8 @@ export interface Question {
   options: string[];
   correct_answers: number[];
   explanation: string | null;
+  image_url: string | null;
+  option_images: (string | null)[] | null;
   created_at: string;
 }
 

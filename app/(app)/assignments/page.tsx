@@ -5,27 +5,26 @@ import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase-client';
 import { useAuth } from '@/lib/auth-context';
 import type { Training, Course, Driver, TrainingStatus, DriverRatingBand, TrainingMaterial, Certificate, Exam } from '@/lib/database-types';
-import { PageHeader } from '@/components/page-header';
-import { DataTable } from '@/components/data-table';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { DatePicker } from '@/components/date-picker';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Card, CardContent } from '@/components/ui/card';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
 } from '@/components/ui/dialog';
-import { Label } from '@/components/ui/label';
 import {
-  Plus, Zap, Download, Edit2, Trash2, CheckCircle2, Clock, AlertTriangle, XCircle,
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import {
+  Plus, Zap, Download, Trash2, CheckCircle2, Clock, AlertTriangle, XCircle,
   GraduationCap, Bell, RefreshCw, ClipboardCheck, Play, Sparkles, User, BookOpen,
-  FileText, Video, Presentation, Headphones, Image as ImageIcon, Award, ExternalLink, Calendar, ShieldCheck,
-  Copy, MessageCircle
+  FileText, Video, Presentation, Headphones, Image as ImageIcon, ShieldCheck,
+  Copy, MessageCircle, ChevronDown, Search, ExternalLink, MoreHorizontal,
 } from 'lucide-react';
-import type { ColumnDef } from '@tanstack/react-table';
 import { TRAINING_STATUS_LABELS, TRAINING_STATUS_COLORS, RATING_BAND_COLORS, MATERIAL_TYPE_LABELS } from '@/lib/constants';
 import { formatDate, classNamesForDue } from '@/lib/format';
 import { exportToCSV } from '@/lib/export';
@@ -336,304 +335,338 @@ export default function AdvancedAssignmentsPage() {
     toast({ title: 'Reminders Sent', description: `Sent notification alerts to ${count} drivers.` });
   }
 
-  const columns: ColumnDef<AssignmentRow>[] = useMemo(() => [
-    {
-      accessorKey: 'driver_name', header: 'Driver',
-      cell: ({ row }) => (
-        <button
-          onClick={() => router.push(`/assignments/${row.original.id}`)}
-          className="text-left hover:underline group cursor-pointer"
-        >
-          <p className="font-semibold text-foreground group-hover:text-primary transition-colors">{row.original.driver_name ?? '—'}</p>
-          <p className="text-xs text-muted-foreground">{row.original.employee_id}</p>
-        </button>
-      ),
-    },
-    {
-      accessorKey: 'course_title', header: 'Course',
-      cell: ({ row }) => (
-        <button onClick={() => router.push(`/assignments/${row.original.id}`)} className="text-left hover:underline cursor-pointer">
-          <span className="font-semibold text-sm text-foreground">{row.original.course_title}</span>
-        </button>
-      ),
-    },
-    {
-      accessorKey: 'status', header: 'Status & Change',
-      cell: ({ row }) => (
-        <Select
-          value={row.original.status}
-          onValueChange={(val) => updateInlineStatus(row.original, val as TrainingStatus)}
-        >
-          <SelectTrigger className="h-8 w-[145px] text-xs font-semibold border-border/60">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {(Object.keys(TRAINING_STATUS_LABELS) as TrainingStatus[]).map((st) => (
-              <SelectItem key={st} value={st} className="text-xs">
-                {TRAINING_STATUS_LABELS[st]}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      ),
-    },
-    {
-      id: 'course_exam', header: 'Evaluation Exam',
-      cell: ({ row }) => {
-        const attempts = row.original.attempt_count ?? 0;
-        const isDone = row.original.status === 'completed';
-        if (row.original.exam_id) {
-          return (
-            <div className="flex flex-col gap-1.5 items-start">
-              <div className="flex items-center gap-1">
-                <Button
-                  size="sm"
-                  variant={isDone || attempts > 0 ? "outline" : "default"}
-                  className={`h-8 text-xs gap-1 ${isDone || attempts > 0 ? 'border-primary/40 text-primary hover:bg-primary/10' : 'shadow-xs'}`}
-                  onClick={() => router.push(`/take-exam/${row.original.exam_id}?driver_id=${row.original.driver_id}`)}
-                >
-                  {attempts > 0 || isDone ? (
-                    <>
-                      <RefreshCw className="h-3.5 w-3.5 text-primary" /> Retake Exam
-                    </>
-                  ) : (
-                    <>
-                      <Play className="h-3.5 w-3.5" /> Start Exam
-                    </>
-                  )}
-                </Button>
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  className="h-8 w-8 text-muted-foreground hover:text-foreground"
-                  title="Copy Exam Share Link"
-                  onClick={() => {
-                    const url = `${window.location.origin}/take-exam/${row.original.exam_id}?driver_id=${row.original.driver_id}`;
-                    navigator.clipboard.writeText(url);
-                    toast({ title: 'Shareable link copied!', description: 'Public exam URL copied to clipboard.' });
-                  }}
-                >
-                  <Copy className="h-3.5 w-3.5" />
-                </Button>
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  className="h-8 w-8 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/40"
-                  title="Share to WhatsApp"
-                  onClick={() => {
-                    const url = `${window.location.origin}/take-exam/${row.original.exam_id}?driver_id=${row.original.driver_id}`;
-                    const msg = `📋 SafeFleet Evaluation Exam: ${row.original.exam_title ?? 'Course Exam'}\n\nPlease click the link below to take your exam:\n${url}`;
-                    window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(msg)}`, '_blank');
-                  }}
-                >
-                  <MessageCircle className="h-3.5 w-3.5" />
-                </Button>
-              </div>
-              {attempts > 0 ? (
-                <span className="text-[10px] font-semibold text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
-                  Attended: {attempts} time{attempts > 1 ? 's' : ''}
-                </span>
-              ) : (
-                <span className="text-[10px] text-muted-foreground">Not taken yet</span>
-              )}
-            </div>
-          );
-        }
-        return canEdit ? (
-          <Button
-            size="sm"
-            variant="ghost"
-            className="h-8 text-xs gap-1 text-muted-foreground hover:text-foreground"
-            onClick={() => createExamForCourse(row.original)}
-          >
-            <Sparkles className="h-3.5 w-3.5 text-amber-500" /> + Add Exam
-          </Button>
-        ) : (
-          <span className="text-xs text-muted-foreground">No Exam</span>
-        );
-      },
-    },
-    {
-      accessorKey: 'due_date', header: 'Due Date',
-      cell: ({ row }) => <span className={classNamesForDue(row.original.due_date)}>{formatDate(row.original.due_date)}</span>,
-    },
-    { accessorKey: 'completed_date', header: 'Completed', cell: ({ row }) => <span className="text-muted-foreground">{formatDate(row.original.completed_date)}</span> },
-    {
-      accessorKey: 'score', header: 'Score',
-      cell: ({ row }) => <span className="tabular-nums font-bold">{row.original.score !== null && row.original.score !== undefined ? `${row.original.score}%` : '—'}</span>,
-    },
-    {
-      id: 'band', header: 'Rating Band',
-      cell: ({ row }) => row.original.driver_band ? (
-        <span className="text-xs font-bold px-2 py-0.5 rounded" style={{ backgroundColor: `${RATING_BAND_COLORS[row.original.driver_band as DriverRatingBand]}20`, color: RATING_BAND_COLORS[row.original.driver_band as DriverRatingBand] }}>
-          {row.original.driver_band}
-        </span>
-      ) : '—',
-    },
-    {
-      id: 'actions', header: 'Actions',
-      cell: ({ row }) => (
-        <div className="flex items-center gap-1">
-          <Button size="sm" variant="default" className="h-8 text-xs gap-1 shadow-xs" onClick={() => router.push(`/assignments/${row.original.id}`)}>
-            <Edit2 className="h-3.5 w-3.5" /> Detailed View
-          </Button>
-          {canEdit && (
-            <Button size="sm" variant="ghost" className="h-8 w-8 p-0 text-destructive hover:text-destructive" onClick={() => deleteAssignment(row.original.id, row.original.driver_name)} title="Delete Assignment">
-              <Trash2 className="h-4 w-4" />
-            </Button>
-          )}
-        </div>
-      ),
-    },
-  ], [canEdit, router]);
+  // No table columns needed — using card list layout
 
   if (loading) {
-    return <div className="space-y-4"><Skeleton className="h-10 w-48" /><Skeleton className="h-24 w-full" /><Skeleton className="h-96 w-full" /></div>;
+    return (
+      <div className="space-y-4 p-1">
+        <div className="flex items-center justify-between">
+          <Skeleton className="h-8 w-56" />
+          <Skeleton className="h-9 w-32" />
+        </div>
+        <div className="grid grid-cols-4 gap-3">
+          {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-20 w-full rounded-xl" />)}
+        </div>
+        <div className="space-y-2">
+          {[...Array(6)].map((_, i) => <Skeleton key={i} className="h-16 w-full rounded-xl" />)}
+        </div>
+      </div>
+    );
   }
 
   return (
-    <div className="space-y-6">
-      <PageHeader
-        title="Training Assignments & Compliance"
-        description="Enterprise training status dashboard — click Detailed View on any row for full course materials, exam, and driver info."
-        actions={
-          <div className="flex flex-wrap gap-2">
-            <Button variant="outline" size="sm" onClick={() => exportToCSV(filteredRows.map((r) => ({
-              Driver: r.driver_name, EmployeeID: r.employee_id, Course: r.course_title,
-              Status: TRAINING_STATUS_LABELS[r.status], DueDate: formatDate(r.due_date),
-              Completed: formatDate(r.completed_date), Score: r.score ?? '', Source: r.source,
-            })), 'assignments.csv')} className="gap-1">
-              <Download className="h-4 w-4" /> Export
+    <div className="space-y-5">
+      {/* ── Header ─────────────────────────────────────────── */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h1 className="text-xl font-bold tracking-tight">Training Assignments</h1>
+          <p className="text-xs text-muted-foreground mt-0.5">{stats.total} total · {stats.rate}% completion rate</p>
+        </div>
+        <div className="flex items-center gap-2">
+          {canEdit && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm" className="gap-1.5 h-9">
+                  More <ChevronDown className="h-3.5 w-3.5" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-48">
+                <DropdownMenuItem onClick={() => exportToCSV(filteredRows.map((r) => ({
+                  Driver: r.driver_name, EmployeeID: r.employee_id, Course: r.course_title,
+                  Status: TRAINING_STATUS_LABELS[r.status], DueDate: formatDate(r.due_date),
+                  Completed: formatDate(r.completed_date), Score: r.score ?? '',
+                })), 'assignments.csv')} className="gap-2">
+                  <Download className="h-4 w-4" /> Export CSV
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={sendOverdueReminders} className="gap-2 text-amber-600">
+                  <Bell className="h-4 w-4" /> Send Overdue Alerts
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={runAutoEngine} className="gap-2">
+                  <Zap className="h-4 w-4" /> Auto-Assign Engine
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+          {canEdit && (
+            <Button size="sm" onClick={() => setAssignOpen(true)} className="gap-1.5 h-9">
+              <Plus className="h-4 w-4" /> Assign Course
             </Button>
-            {canEdit && (
-              <Button variant="outline" size="sm" onClick={sendOverdueReminders} className="gap-1 text-amber-600 border-amber-300 hover:bg-amber-50 dark:text-amber-400">
-                <Bell className="h-4 w-4" /> Send Overdue Alerts
-              </Button>
-            )}
-            {canEdit && <Button variant="outline" size="sm" onClick={runAutoEngine} className="gap-1"><Zap className="h-4 w-4" /> Auto-Assign</Button>}
-            {canEdit && <Button size="sm" onClick={() => setAssignOpen(true)} className="gap-1"><Plus className="h-4 w-4" /> Assign Course</Button>}
-          </div>
-        }
-      />
-
-      {/* KPI Overview Cards */}
-      <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-        <Card className="border-border/60 shadow-sm">
-          <CardContent className="p-4 flex items-center justify-between">
-            <div>
-              <p className="text-xs font-semibold text-muted-foreground">Total Assigned</p>
-              <p className="text-2xl font-bold tracking-tight text-foreground">{stats.total}</p>
-            </div>
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
-              <GraduationCap className="h-5 w-5" />
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="border-border/60 shadow-sm">
-          <CardContent className="p-4 flex items-center justify-between">
-            <div>
-              <p className="text-xs font-semibold text-muted-foreground">Pending / In-Progress</p>
-              <p className="text-2xl font-bold tracking-tight text-amber-600 dark:text-amber-400">{stats.pending}</p>
-            </div>
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-500/10 text-amber-600">
-              <Clock className="h-5 w-5" />
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="border-border/60 shadow-sm">
-          <CardContent className="p-4 flex items-center justify-between">
-            <div>
-              <p className="text-xs font-semibold text-muted-foreground">Completed ({stats.rate}%)</p>
-              <p className="text-2xl font-bold tracking-tight text-emerald-600 dark:text-emerald-400">{stats.completed}</p>
-            </div>
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-600">
-              <CheckCircle2 className="h-5 w-5" />
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="border-border/60 shadow-sm">
-          <CardContent className="p-4 flex items-center justify-between">
-            <div>
-              <p className="text-xs font-semibold text-muted-foreground">Overdue / Expired</p>
-              <p className="text-2xl font-bold tracking-tight text-destructive">{stats.overdue}</p>
-            </div>
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
-              <AlertTriangle className="h-5 w-5" />
-            </div>
-          </CardContent>
-        </Card>
+          )}
+        </div>
       </div>
 
-      {/* Tabs & Filters Toolbar */}
-      <Tabs defaultValue="all" value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <TabsList className="flex h-auto flex-wrap gap-1 bg-muted/60 p-1">
-            <TabsTrigger value="all" className="gap-1.5 text-xs font-semibold">
-              All Assignments ({stats.total})
-            </TabsTrigger>
-            <TabsTrigger value="pending" className="gap-1.5 text-xs font-semibold">
-              <Clock className="h-3.5 w-3.5 text-amber-500" />
-              Pending ({stats.pending})
-            </TabsTrigger>
-            <TabsTrigger value="overdue" className="gap-1.5 text-xs font-semibold">
-              <AlertTriangle className="h-3.5 w-3.5 text-destructive" />
-              Overdue ({stats.overdue})
-            </TabsTrigger>
-            <TabsTrigger value="completed" className="gap-1.5 text-xs font-semibold">
-              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
-              Completed ({stats.completed})
-            </TabsTrigger>
-            <TabsTrigger value="failed" className="gap-1.5 text-xs font-semibold">
-              <XCircle className="h-3.5 w-3.5 text-rose-500" />
-              Failed ({stats.failed})
-            </TabsTrigger>
-          </TabsList>
+      {/* ── KPI Strip ──────────────────────────────────────── */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        {[
+          { label: 'Total', value: stats.total, color: 'text-foreground', bg: 'bg-primary/8', icon: <GraduationCap className="h-4 w-4" />, tab: 'all' },
+          { label: 'Pending', value: stats.pending, color: 'text-amber-600 dark:text-amber-400', bg: 'bg-amber-500/10', icon: <Clock className="h-4 w-4" />, tab: 'pending' },
+          { label: 'Completed', value: `${stats.completed} (${stats.rate}%)`, color: 'text-emerald-600 dark:text-emerald-400', bg: 'bg-emerald-500/10', icon: <CheckCircle2 className="h-4 w-4" />, tab: 'completed' },
+          { label: 'Overdue', value: stats.overdue, color: 'text-destructive', bg: 'bg-destructive/10', icon: <AlertTriangle className="h-4 w-4" />, tab: 'overdue' },
+        ].map((s) => (
+          <button
+            key={s.tab}
+            onClick={() => setActiveTab(s.tab)}
+            className={`text-left rounded-xl border p-3.5 transition-all hover:shadow-sm ${
+              activeTab === s.tab ? 'border-primary/40 ring-1 ring-primary/20 bg-primary/5' : 'border-border/60 bg-card hover:border-primary/20'
+            }`}
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold text-muted-foreground">{s.label}</span>
+              <span className={`flex h-7 w-7 items-center justify-center rounded-lg ${s.bg} ${s.color}`}>{s.icon}</span>
+            </div>
+            <p className={`mt-1.5 text-xl font-bold tabular-nums ${s.color}`}>{s.value}</p>
+          </button>
+        ))}
+      </div>
 
-          {/* Secondary Filters */}
-          <div className="flex flex-wrap items-center gap-2">
-            <Select value={bandFilter} onValueChange={setBandFilter}>
-              <SelectTrigger className="w-[140px] h-9 text-xs"><SelectValue placeholder="Rating Band" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Rating Bands</SelectItem>
-                <SelectItem value="D1">D1 - Top Performer</SelectItem>
-                <SelectItem value="D2">D2 - Good</SelectItem>
-                <SelectItem value="D3">D3 - Needs Work</SelectItem>
-                <SelectItem value="D4">D4 - High Risk</SelectItem>
-              </SelectContent>
-            </Select>
-
-            <Select value={courseFilter} onValueChange={setCourseFilter}>
-              <SelectTrigger className="w-[180px] h-9 text-xs"><SelectValue placeholder="Course Filter" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Courses</SelectItem>
-                {courses.map((c) => (
-                  <SelectItem key={c.id} value={c.id}>{c.title}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-
-            {(bandFilter !== 'all' || courseFilter !== 'all') && (
-              <Button variant="ghost" size="sm" onClick={() => { setBandFilter('all'); setCourseFilter('all'); }} className="h-9 text-xs gap-1">
-                <RefreshCw className="h-3.5 w-3.5" /> Reset Filters
-              </Button>
-            )}
-          </div>
+      {/* ── Toolbar ─────────────────────────────────────────── */}
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative flex-1 min-w-[200px]">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+          <Input
+            value={globalFilter}
+            onChange={(e) => setGlobalFilter(e.target.value)}
+            placeholder="Search driver, ID, course…"
+            className="pl-8 h-9 text-sm"
+          />
         </div>
 
-        {/* Tab Content Tables */}
-        <TabsContent value={activeTab} className="mt-0 space-y-4">
-          <DataTable
-            columns={columns}
-            data={filteredRows}
-            globalFilter={globalFilter}
-            onGlobalFilterChange={setGlobalFilter}
-            searchPlaceholder="Search driver name, ID, or course title..."
-          />
-        </TabsContent>
-      </Tabs>
+        {/* Status tabs as small filter pills */}
+        <div className="flex items-center gap-1 bg-muted/60 p-1 rounded-lg">
+          {([
+            { key: 'all', label: 'All', count: stats.total },
+            { key: 'pending', label: 'Pending', count: stats.pending },
+            { key: 'overdue', label: 'Overdue', count: stats.overdue },
+            { key: 'completed', label: 'Done', count: stats.completed },
+            { key: 'failed', label: 'Failed', count: stats.failed },
+          ] as const).map((t) => (
+            <button
+              key={t.key}
+              onClick={() => setActiveTab(t.key)}
+              className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-colors ${
+                activeTab === t.key
+                  ? 'bg-background shadow text-foreground'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              {t.label} {t.count > 0 && <span className="opacity-60">({t.count})</span>}
+            </button>
+          ))}
+        </div>
+
+        <Select value={courseFilter} onValueChange={setCourseFilter}>
+          <SelectTrigger className="w-[160px] h-9 text-xs"><SelectValue placeholder="All Courses" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Courses</SelectItem>
+            {courses.map((c) => <SelectItem key={c.id} value={c.id}>{c.title}</SelectItem>)}
+          </SelectContent>
+        </Select>
+
+        <Select value={bandFilter} onValueChange={setBandFilter}>
+          <SelectTrigger className="w-[120px] h-9 text-xs"><SelectValue placeholder="Band" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Bands</SelectItem>
+            <SelectItem value="D1">D1</SelectItem>
+            <SelectItem value="D2">D2</SelectItem>
+            <SelectItem value="D3">D3</SelectItem>
+            <SelectItem value="D4">D4</SelectItem>
+          </SelectContent>
+        </Select>
+
+        {(bandFilter !== 'all' || courseFilter !== 'all' || globalFilter) && (
+          <Button variant="ghost" size="sm" className="h-9 text-xs" onClick={() => { setBandFilter('all'); setCourseFilter('all'); setGlobalFilter(''); }}>
+            <RefreshCw className="h-3 w-3 mr-1" /> Clear
+          </Button>
+        )}
+      </div>
+
+      {/* ── Assignment Card List ─────────────────────────────── */}
+      <div className="space-y-2">
+        {filteredRows.length === 0 ? (
+          <div className="rounded-xl border border-dashed p-12 text-center">
+            <GraduationCap className="h-8 w-8 mx-auto mb-3 text-muted-foreground/40" />
+            <p className="text-sm font-medium text-muted-foreground">No assignments found</p>
+            <p className="text-xs text-muted-foreground/60 mt-1">Try adjusting filters or assign a new course</p>
+          </div>
+        ) : (
+          filteredRows
+            .filter((r) => {
+              if (!globalFilter) return true;
+              const q = globalFilter.toLowerCase();
+              return (
+                r.driver_name?.toLowerCase().includes(q) ||
+                r.employee_id?.toLowerCase().includes(q) ||
+                r.course_title?.toLowerCase().includes(q)
+              );
+            })
+            .map((row) => {
+              const attempts = row.attempt_count ?? 0;
+              const isDone = row.status === 'completed';
+              const isFailed = row.status === 'failed';
+              const isOverdue = row.status === 'overdue' || row.status === 'expired';
+              const band = row.driver_band as DriverRatingBand | undefined;
+
+              return (
+                <div
+                  key={row.id}
+                  className={`group flex items-center gap-3 rounded-xl border bg-card px-4 py-3 transition-all hover:shadow-sm cursor-pointer ${
+                    isOverdue ? 'border-destructive/30 bg-destructive/[0.02]' :
+                    isFailed ? 'border-rose-500/30 bg-rose-500/[0.02]' :
+                    isDone ? 'border-emerald-500/20' : 'border-border/60'
+                  }`}
+                  onClick={() => openDetailModal(row)}
+                >
+                  {/* Status dot */}
+                  <div className={`h-2 w-2 shrink-0 rounded-full ${
+                    isDone ? 'bg-emerald-500' :
+                    isOverdue ? 'bg-destructive animate-pulse' :
+                    isFailed ? 'bg-rose-500' :
+                    row.status === 'in_progress' ? 'bg-amber-400' : 'bg-muted-foreground/40'
+                  }`} />
+
+                  {/* Driver avatar */}
+                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary text-xs font-bold">
+                    {row.driver_name?.charAt(0) ?? '?'}
+                  </div>
+
+                  {/* Main info */}
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-sm font-semibold truncate">{row.driver_name ?? '—'}</span>
+                      <span className="text-xs text-muted-foreground">{row.employee_id}</span>
+                      {band && (
+                        <span
+                          className="text-[10px] font-bold px-1.5 py-0.5 rounded"
+                          style={{ backgroundColor: `${RATING_BAND_COLORS[band]}18`, color: RATING_BAND_COLORS[band] }}
+                        >
+                          {band}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-muted-foreground truncate mt-0.5">{row.course_title}</p>
+                  </div>
+
+                  {/* Status badge */}
+                  <Badge
+                    variant="secondary"
+                    className={`shrink-0 text-[10px] font-bold hidden sm:inline-flex ${TRAINING_STATUS_COLORS[row.status]}`}
+                  >
+                    {TRAINING_STATUS_LABELS[row.status]}
+                  </Badge>
+
+                  {/* Due date */}
+                  <div className="hidden md:block text-right shrink-0">
+                    <p className="text-[10px] text-muted-foreground">Due</p>
+                    <p className={`text-xs font-semibold ${classNamesForDue(row.due_date)}`}>
+                      {formatDate(row.due_date) || '—'}
+                    </p>
+                  </div>
+
+                  {/* Score */}
+                  {row.score !== null && row.score !== undefined && (
+                    <div className="hidden md:block text-right shrink-0">
+                      <p className="text-[10px] text-muted-foreground">Score</p>
+                      <p className={`text-xs font-bold ${
+                        row.score >= 70 ? 'text-emerald-600 dark:text-emerald-400' : 'text-destructive'
+                      }`}>{row.score}%</p>
+                    </div>
+                  )}
+
+                  {/* Exam / Action area */}
+                  <div className="shrink-0 flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                    {row.exam_id ? (
+                      <>
+                        <Button
+                          size="sm"
+                          variant={isDone || attempts > 0 ? 'outline' : 'default'}
+                          className={`h-7 text-xs gap-1 ${
+                            isDone || attempts > 0
+                              ? 'border-primary/40 text-primary hover:bg-primary/10'
+                              : 'shadow-xs'
+                          }`}
+                          onClick={() => router.push(`/take-exam/${row.exam_id}?driver_id=${row.driver_id}`)}
+                        >
+                          {attempts > 0 || isDone ? (
+                            <><RefreshCw className="h-3 w-3" /> Retake</>
+                          ) : (
+                            <><Play className="h-3 w-3" /> Exam</>
+                          )}
+                        </Button>
+                        {attempts > 0 && (
+                          <span className="text-[10px] text-muted-foreground hidden lg:inline">{attempts}×</span>
+                        )}
+                        <Button
+                          size="icon" variant="ghost"
+                          className="h-7 w-7 text-emerald-600 hover:bg-emerald-50"
+                          title="Share via WhatsApp"
+                          onClick={() => {
+                            const url = `${window.location.origin}/take-exam/${row.exam_id}?driver_id=${row.driver_id}`;
+                            const msg = `📋 SafeFleet Exam: ${row.exam_title ?? 'Course Exam'}\n\n${url}`;
+                            window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(msg)}`, '_blank');
+                          }}
+                        >
+                          <MessageCircle className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button
+                          size="icon" variant="ghost"
+                          className="h-7 w-7 text-muted-foreground"
+                          title="Copy link"
+                          onClick={() => {
+                            const url = `${window.location.origin}/take-exam/${row.exam_id}?driver_id=${row.driver_id}`;
+                            navigator.clipboard.writeText(url);
+                            toast({ title: 'Link copied!' });
+                          }}
+                        >
+                          <Copy className="h-3.5 w-3.5" />
+                        </Button>
+                      </>
+                    ) : canEdit ? (
+                      <Button
+                        size="sm" variant="ghost"
+                        className="h-7 text-xs gap-1 text-muted-foreground"
+                        onClick={() => createExamForCourse(row)}
+                      >
+                        <Sparkles className="h-3 w-3 text-amber-500" /> Exam
+                      </Button>
+                    ) : null}
+
+                    {canEdit && (
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button size="icon" variant="ghost" className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <MoreHorizontal className="h-3.5 w-3.5" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-40">
+                          {(Object.keys(TRAINING_STATUS_LABELS) as TrainingStatus[]).map((st) => (
+                            <DropdownMenuItem
+                              key={st}
+                              onClick={() => updateInlineStatus(row, st)}
+                              className={`text-xs ${row.status === st ? 'font-bold' : ''}`}
+                            >
+                              {TRAINING_STATUS_LABELS[st]}
+                            </DropdownMenuItem>
+                          ))}
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem
+                            onClick={() => deleteAssignment(row.id, row.driver_name)}
+                            className="text-xs text-destructive focus:text-destructive gap-2"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" /> Delete
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    )}
+                  </div>
+                </div>
+              );
+            })
+        )}
+      </div>
+      <p className="text-xs text-muted-foreground text-right">
+        Showing {filteredRows.filter((r) => !globalFilter || [r.driver_name, r.employee_id, r.course_title].some((f) => f?.toLowerCase().includes(globalFilter.toLowerCase()))).length} of {rows.length}
+      </p>
 
       {/* Manual Assign Modal */}
       <ManualAssignDialog open={assignOpen} onOpenChange={setAssignOpen} drivers={drivers} courses={courses} onSaved={load} />
