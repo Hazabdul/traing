@@ -22,6 +22,7 @@ import { ClipboardCheck, Clock, CheckCircle2, XCircle, Play, Plus, Settings } fr
 import { formatDateTime } from '@/lib/format';
 import { useToast } from '@/hooks/use-toast';
 import { logAudit } from '@/lib/audit';
+import { createExamRecord } from '@/lib/exam-service';
 
 export default function ExamsPage() {
   const { profile } = useAuth();
@@ -82,18 +83,18 @@ export default function ExamsPage() {
       return;
     }
     setCreating(true);
-    const { data: newExam, error } = await supabase.from('exams').insert({
+    const { data: newExam, error } = await createExamRecord({
       title,
       description: description || null,
       course_id: courseId || null,
       pass_percentage: Number(passPercentage) || 70,
       time_limit_minutes: Number(timeLimit) || 30,
       is_active: true,
-    }).select().single();
+    });
 
     setCreating(false);
-    if (error) {
-      toast({ title: 'Failed to create exam', description: error.message, variant: 'destructive' });
+    if (error || !newExam) {
+      toast({ title: 'Failed to create exam', description: error?.message ?? 'Permission or connection error', variant: 'destructive' });
       return;
     }
 

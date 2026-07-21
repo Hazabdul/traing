@@ -23,6 +23,7 @@ import { TRAINING_STATUS_LABELS, TRAINING_STATUS_COLORS, RATING_BAND_COLORS, MAT
 import { formatDate, classNamesForDue } from '@/lib/format';
 import { useToast } from '@/hooks/use-toast';
 import { logAudit } from '@/lib/audit';
+import { createExamRecord } from '@/lib/exam-service';
 
 interface FullAssignmentDetail extends Training {
   course: Course | null;
@@ -140,7 +141,7 @@ export default function AssignmentDetailPage() {
 
   async function createExamForCourse() {
     if (!data?.course_id) return;
-    const { data: newExam, error } = await supabase.from('exams').insert({
+    const { data: newExam, error } = await createExamRecord({
       title: `${data.course?.title} Final Exam`,
       description: `Evaluation exam for course: ${data.course?.title}`,
       course_id: data.course_id,
@@ -148,10 +149,10 @@ export default function AssignmentDetailPage() {
       time_limit_minutes: 30,
       is_active: true,
       randomize_questions: true,
-    }).select().single();
+    });
 
-    if (error) {
-      toast({ title: 'Failed to create exam', description: error.message, variant: 'destructive' });
+    if (error || !newExam) {
+      toast({ title: 'Failed to create exam', description: error?.message ?? 'Permission or network error', variant: 'destructive' });
       return;
     }
 

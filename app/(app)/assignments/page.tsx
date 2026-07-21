@@ -30,6 +30,7 @@ import { formatDate, classNamesForDue } from '@/lib/format';
 import { exportToCSV } from '@/lib/export';
 import { useToast } from '@/hooks/use-toast';
 import { logAudit } from '@/lib/audit';
+import { createExamRecord } from '@/lib/exam-service';
 
 interface AssignmentRow extends Training {
   driver_name?: string;
@@ -199,7 +200,7 @@ export default function AdvancedAssignmentsPage() {
 
   async function createExamForCourse(row: AssignmentRow) {
     if (!row.course_id) return;
-    const { data: newExam, error } = await supabase.from('exams').insert({
+    const { data: newExam, error } = await createExamRecord({
       title: `${row.course_title} Final Exam`,
       description: `Evaluation exam for course: ${row.course_title}`,
       course_id: row.course_id,
@@ -207,10 +208,10 @@ export default function AdvancedAssignmentsPage() {
       time_limit_minutes: 30,
       is_active: true,
       randomize_questions: true,
-    }).select().single();
+    });
 
-    if (error) {
-      toast({ title: 'Failed to create exam', description: error.message, variant: 'destructive' });
+    if (error || !newExam) {
+      toast({ title: 'Failed to create exam', description: error?.message ?? 'Permission or network error', variant: 'destructive' });
       return;
     }
 

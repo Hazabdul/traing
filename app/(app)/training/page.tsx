@@ -25,6 +25,7 @@ import {
 import { TRAINING_FREQUENCY_LABELS, MATERIAL_TYPE_LABELS } from '@/lib/constants';
 import { useToast } from '@/hooks/use-toast';
 import { logAudit } from '@/lib/audit';
+import { createExamRecord } from '@/lib/exam-service';
 
 const MATERIAL_ICONS: Record<MaterialType, typeof FileText> = {
   pdf: FileText,
@@ -97,7 +98,7 @@ export default function TrainingLibraryPage() {
 
   async function createExamForCourse(course: Course) {
     setCreatingExamCourseId(course.id);
-    const { data: newExam, error } = await supabase.from('exams').insert({
+    const { data: newExam, error } = await createExamRecord({
       title: `${course.title} Final Exam`,
       description: `Official evaluation exam for course: ${course.title}`,
       course_id: course.id,
@@ -105,11 +106,11 @@ export default function TrainingLibraryPage() {
       time_limit_minutes: 30,
       is_active: true,
       randomize_questions: true,
-    }).select().single();
+    });
 
     setCreatingExamCourseId(null);
-    if (error) {
-      toast({ title: 'Failed to create exam', description: error.message, variant: 'destructive' });
+    if (error || !newExam) {
+      toast({ title: 'Failed to create exam', description: error?.message ?? 'Permission or network error', variant: 'destructive' });
       return;
     }
 
