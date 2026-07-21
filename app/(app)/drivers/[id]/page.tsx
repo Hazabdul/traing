@@ -35,6 +35,7 @@ import {
 import { formatDate, formatDateTime, daysUntil, classNamesForDue } from '@/lib/format';
 import { useToast } from '@/hooks/use-toast';
 import { logAudit } from '@/lib/audit';
+import { computeCleanRecordBonus } from '@/lib/rating-engine';
 
 interface DriverDetailData {
   driver: Driver;
@@ -134,6 +135,17 @@ export default function DriverDetailPage({ params }: { params: { id: string } })
   const initials = driver.full_name.split(' ').map((s) => s[0]).slice(0, 2).join('');
   const band = driver.last_rating_band;
 
+  // ── Summary stats for the quick-glance strip ──────────────────────────────
+  const completedTrainings = trainings.filter((t) => t.status === 'completed').length;
+  const passedExams        = attempts.filter((a) => a.passed).length;
+  const cleanBonus         = computeCleanRecordBonus(
+    accidents.map((a) => a.accident_date),
+    violations.map((v) => v.violation_date),
+    warnings.map((w) => w.warning_date),
+    behaviours.map((b) => b.assessment_date),
+  );
+  const isClean = cleanBonus > 0;
+
   return (
     <div className="space-y-6">
       <Button variant="ghost" size="sm" onClick={() => router.push('/drivers')} className="-ml-2 gap-1">
@@ -173,6 +185,80 @@ export default function DriverDetailPage({ params }: { params: { id: string } })
           </div>
         </CardContent>
       </Card>
+
+      {/* ── Quick-Stats Strip ────────────────────────────────────────────── */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-8">
+        {/* Accidents */}
+        <div className={`rounded-xl border p-3 text-center transition-colors ${
+          accidents.length > 0 ? 'border-destructive/40 bg-destructive/5' : 'border-border/60 bg-card'
+        }`}>
+          <AlertTriangle className={`h-4 w-4 mx-auto mb-1 ${ accidents.length > 0 ? 'text-destructive' : 'text-muted-foreground/40'}`} />
+          <p className={`text-2xl font-extrabold tabular-nums ${ accidents.length > 0 ? 'text-destructive' : 'text-foreground'}`}>{accidents.length}</p>
+          <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mt-0.5">Accidents</p>
+        </div>
+
+        {/* Violations */}
+        <div className={`rounded-xl border p-3 text-center transition-colors ${
+          violations.length > 0 ? 'border-amber-500/40 bg-amber-500/5' : 'border-border/60 bg-card'
+        }`}>
+          <AlertCircle className={`h-4 w-4 mx-auto mb-1 ${ violations.length > 0 ? 'text-amber-500' : 'text-muted-foreground/40'}`} />
+          <p className={`text-2xl font-extrabold tabular-nums ${ violations.length > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-foreground'}`}>{violations.length}</p>
+          <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mt-0.5">Violations</p>
+        </div>
+
+        {/* Warnings */}
+        <div className={`rounded-xl border p-3 text-center transition-colors ${
+          warnings.length > 0 ? 'border-orange-500/40 bg-orange-500/5' : 'border-border/60 bg-card'
+        }`}>
+          <ShieldAlert className={`h-4 w-4 mx-auto mb-1 ${ warnings.length > 0 ? 'text-orange-500' : 'text-muted-foreground/40'}`} />
+          <p className={`text-2xl font-extrabold tabular-nums ${ warnings.length > 0 ? 'text-orange-600 dark:text-orange-400' : 'text-foreground'}`}>{warnings.length}</p>
+          <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mt-0.5">Warnings</p>
+        </div>
+
+        {/* Assessments */}
+        <div className="rounded-xl border border-border/60 bg-card p-3 text-center">
+          <ClipboardList className="h-4 w-4 mx-auto mb-1 text-muted-foreground/40" />
+          <p className="text-2xl font-extrabold tabular-nums text-foreground">{behaviours.length}</p>
+          <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mt-0.5">Assessments</p>
+        </div>
+
+        {/* Trainings */}
+        <div className="rounded-xl border border-border/60 bg-card p-3 text-center">
+          <Briefcase className="h-4 w-4 mx-auto mb-1 text-primary/60" />
+          <p className="text-2xl font-extrabold tabular-nums text-foreground">
+            {completedTrainings}<span className="text-sm font-normal text-muted-foreground">/{trainings.length}</span>
+          </p>
+          <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mt-0.5">Trainings</p>
+        </div>
+
+        {/* Exams */}
+        <div className="rounded-xl border border-border/60 bg-card p-3 text-center">
+          <Shield className="h-4 w-4 mx-auto mb-1 text-primary/60" />
+          <p className="text-2xl font-extrabold tabular-nums text-foreground">
+            {passedExams}<span className="text-sm font-normal text-muted-foreground">/{attempts.length}</span>
+          </p>
+          <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mt-0.5">Exams Passed</p>
+        </div>
+
+        {/* Certificates */}
+        <div className="rounded-xl border border-border/60 bg-card p-3 text-center">
+          <Award className="h-4 w-4 mx-auto mb-1 text-emerald-500" />
+          <p className="text-2xl font-extrabold tabular-nums text-foreground">{certificates.length}</p>
+          <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mt-0.5">Certificates</p>
+        </div>
+
+        {/* Clean Record Bonus */}
+        <div className={`rounded-xl border p-3 text-center transition-colors ${
+          isClean ? 'border-emerald-500/40 bg-emerald-500/5' : 'border-border/60 bg-card'
+        }`}>
+          <Star className={`h-4 w-4 mx-auto mb-1 ${ isClean ? 'text-emerald-500' : 'text-muted-foreground/40'}`}
+            fill={isClean ? 'currentColor' : 'none'} />
+          <p className={`text-2xl font-extrabold tabular-nums ${ isClean ? 'text-emerald-600 dark:text-emerald-400' : 'text-muted-foreground'}`}>
+            {isClean ? '+5' : '—'}
+          </p>
+          <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mt-0.5">Clean 2mo</p>
+        </div>
+      </div>
 
       <Tabs defaultValue="overview">
         <TabsList className="flex h-auto flex-wrap gap-1 bg-muted/60 p-1">
