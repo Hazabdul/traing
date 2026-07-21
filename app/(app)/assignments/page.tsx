@@ -24,6 +24,7 @@ import {
   GraduationCap, Bell, RefreshCw, ClipboardCheck, Play, Sparkles, User, BookOpen,
   FileText, Video, Presentation, Headphones, Image as ImageIcon, ShieldCheck,
   Copy, MessageCircle, ChevronDown, Search, ExternalLink, MoreHorizontal,
+  ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
 } from 'lucide-react';
 import { TRAINING_STATUS_LABELS, TRAINING_STATUS_COLORS, RATING_BAND_COLORS, MATERIAL_TYPE_LABELS } from '@/lib/constants';
 import { formatDate, classNamesForDue } from '@/lib/format';
@@ -69,6 +70,10 @@ export default function AdvancedAssignmentsPage() {
   const [bandFilter, setBandFilter] = useState('all');
   const [courseFilter, setCourseFilter] = useState('all');
   const [assignOpen, setAssignOpen] = useState(false);
+
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
 
   // Detail Modal state
   const [selectedAssignment, setSelectedAssignment] = useState<AssignmentRow | null>(null);
@@ -151,9 +156,32 @@ export default function AdvancedAssignmentsPage() {
       // Course filter
       if (courseFilter !== 'all' && r.course_id !== courseFilter) return false;
 
+      // Global search filter
+      if (globalFilter) {
+        const q = globalFilter.toLowerCase();
+        const match =
+          r.driver_name?.toLowerCase().includes(q) ||
+          r.employee_id?.toLowerCase().includes(q) ||
+          r.course_title?.toLowerCase().includes(q);
+        if (!match) return false;
+      }
+
       return true;
     });
-  }, [rows, activeTab, bandFilter, courseFilter]);
+  }, [rows, activeTab, bandFilter, courseFilter, globalFilter]);
+
+  // Reset page when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [activeTab, bandFilter, courseFilter, globalFilter, pageSize]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredRows.length / pageSize));
+  const validCurrentPage = Math.min(currentPage, totalPages);
+  const startIndex = (validCurrentPage - 1) * pageSize;
+  const endIndex = Math.min(startIndex + pageSize, filteredRows.length);
+  const paginatedRows = useMemo(() => {
+    return filteredRows.slice(startIndex, endIndex);
+  }, [filteredRows, startIndex, endIndex]);
 
   async function openDetailModal(row: AssignmentRow) {
     setSelectedAssignment(row);
@@ -471,17 +499,7 @@ export default function AdvancedAssignmentsPage() {
             <p className="text-xs text-muted-foreground/60 mt-1">Try adjusting filters or assign a new course</p>
           </div>
         ) : (
-          filteredRows
-            .filter((r) => {
-              if (!globalFilter) return true;
-              const q = globalFilter.toLowerCase();
-              return (
-                r.driver_name?.toLowerCase().includes(q) ||
-                r.employee_id?.toLowerCase().includes(q) ||
-                r.course_title?.toLowerCase().includes(q)
-              );
-            })
-            .map((row) => {
+          paginatedRows.map((row) => {
               const attempts = row.attempt_count ?? 0;
               const isDone = row.status === 'completed';
               const isFailed = row.status === 'failed';
@@ -645,9 +663,80 @@ export default function AdvancedAssignmentsPage() {
             })
         )}
       </div>
-      <p className="text-xs text-muted-foreground text-right">
-        Showing {filteredRows.filter((r) => !globalFilter || [r.driver_name, r.employee_id, r.course_title].some((f) => f?.toLowerCase().includes(globalFilter.toLowerCase()))).length} of {rows.length}
-      </p>
+
+      {/* ── Pagination Controls ─────────────────────────────── */}
+      {filteredRows.length > 0 && (
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2 text-xs text-muted-foreground">
+          <div className="flex items-center gap-2">
+            <span>Rows per page:</span>
+            <Select value={String(pageSize)} onValueChange={(val) => setPageSize(Number(val))}>
+              <SelectTrigger className="h-8 w-[70px] text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="10">10</SelectItem>
+                <SelectItem value="20">20</SelectItem>
+                <SelectItem value="50">50</SelectItem>
+                <SelectItem value="100">100</SelectItem>
+              </SelectContent>
+            </Select>
+            <span className="ml-2">
+              Showing <span className="font-semibold text-foreground">{filteredRows.length > 0 ? startIndex + 1 : 0}</span> to{' '}
+              <span className="font-semibold text-foreground">{endIndex}</span> of{' '}
+              <span className="font-semibold text-foreground">{filteredRows.length}</span> assignments
+              {filteredRows.length !== rows.length && ` (filtered from ${rows.length})`}
+            </span>
+          </div>
+
+          <div className="flex items-center gap-1">
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-8 w-8"
+              onClick={() => setCurrentPage(1)}
+              disabled={validCurrentPage <= 1}
+              title="First Page"
+            >
+              <ChevronsLeft className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-8 w-8"
+              onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+              disabled={validCurrentPage <= 1}
+              title="Previous Page"
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+
+            <span className="px-2 font-medium text-foreground">
+              Page {validCurrentPage} of {totalPages}
+            </span>
+
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-8 w-8"
+              onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+              disabled={validCurrentPage >= totalPages}
+              title="Next Page"
+            >
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-8 w-8"
+              onClick={() => setCurrentPage(totalPages)}
+              disabled={validCurrentPage >= totalPages}
+              title="Last Page"
+            >
+              <ChevronsRight className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+      )}
 
       {/* Manual Assign Modal */}
       <ManualAssignDialog open={assignOpen} onOpenChange={setAssignOpen} drivers={drivers} courses={courses} onSaved={load} />
