@@ -1,9 +1,10 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase-client';
 import { useAuth } from '@/lib/auth-context';
-import type { Course, Plant, TrainingMaterial, TrainingFrequency, MaterialType } from '@/lib/database-types';
+import type { Course, Plant, TrainingMaterial, TrainingFrequency, MaterialType, Exam } from '@/lib/database-types';
 import { PageHeader } from '@/components/page-header';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -16,11 +17,10 @@ import { Skeleton } from '@/components/ui/skeleton';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
 } from '@/components/ui/dialog';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
   Plus, BookOpen, FileText, Video, Image as ImageIcon, Headphones, Presentation,
-  Clock, Globe, Calendar, Edit, Trash2, Award,
+  Clock, Globe, Edit, Trash2, Award, ClipboardCheck, ExternalLink, Settings, Sparkles
 } from 'lucide-react';
 import { TRAINING_FREQUENCY_LABELS, MATERIAL_TYPE_LABELS } from '@/lib/constants';
 import { useToast } from '@/hooks/use-toast';
@@ -35,23 +35,26 @@ const MATERIAL_ICONS: Record<MaterialType, typeof FileText> = {
 };
 
 export default function TrainingLibraryPage() {
+  const router = useRouter();
   const { profile } = useAuth();
   const canEdit = ['system_admin', 'ehss_manager', 'ehss_officer', 'training_coordinator'].includes(profile?.role ?? '');
-  const [courses, setCourses] = useState<(Course & { materials?: TrainingMaterial[]; plants?: Plant[] })[]>([]);
+  const [courses, setCourses] = useState<(Course & { materials?: TrainingMaterial[]; plants?: Plant[]; exam?: Exam | null })[]>([]);
   const [plants, setPlants] = useState<Plant[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [editOpen, setEditOpen] = useState(false);
   const [editing, setEditing] = useState<Course | null>(null);
+  const [creatingExamCourseId, setCreatingExamCourseId] = useState<string | null>(null);
   const { toast } = useToast();
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [{ data: c }, { data: m }, { data: pc }, { data: p }] = await Promise.all([
+    const [{ data: c }, { data: m }, { data: pc }, { data: p }, { data: ex }] = await Promise.all([
       supabase.from('courses').select('*').order('title'),
       supabase.from('training_materials').select('*'),
       supabase.from('plant_courses').select('plant_id, course_id'),
       supabase.from('plants').select('*').order('name'),
+      supabase.from('exams').select('*').eq('is_active', true),
     ]);
     const matByCourse = new Map<string, TrainingMaterial[]>();
     (m ?? []).forEach((x: TrainingMaterial) => {
@@ -59,6 +62,7 @@ export default function TrainingLibraryPage() {
       arr.push(x);
       matByCourse.set(x.course_id, arr);
     });
+
     const plantsByCourse = new Map<string, Plant[]>();
     (pc ?? []).forEach((x: { course_id: string; plant_id: string }) => {
       const plant = (p ?? []).find((pl: Plant) => pl.id === x.plant_id);
@@ -68,10 +72,17 @@ export default function TrainingLibraryPage() {
         plantsByCourse.set(x.course_id, arr);
       }
     });
+
+    const examByCourse = new Map<string, Exam>();
+    (ex ?? []).forEach((e: Exam) => {
+      if (e.course_id) examByCourse.set(e.course_id, e);
+    });
+
     setCourses((c ?? []).map((course: Course) => ({
       ...course,
       materials: matByCourse.get(course.id) ?? [],
       plants: plantsByCourse.get(course.id) ?? [],
+      exam: examByCourse.get(course.id) ?? null,
     })));
     setPlants(p ?? []);
     setLoading(false);
@@ -83,6 +94,29 @@ export default function TrainingLibraryPage() {
     c.title.toLowerCase().includes(search.toLowerCase()) ||
     (c.category ?? '').toLowerCase().includes(search.toLowerCase())
   );
+
+  async function createExamForCourse(course: Course) {
+    setCreatingExamCourseId(course.id);
+    const { data: newExam, error } = await supabase.from('exams').insert({
+      title: `${course.title} Final Exam`,
+      description: `Official evaluation exam for course: ${course.title}`,
+      course_id: course.id,
+      pass_percentage: course.pass_percentage ?? 70,
+      time_limit_minutes: 30,
+      is_active: true,
+      randomize_questions: true,
+    }).select().single();
+
+    setCreatingExamCourseId(null);
+    if (error) {
+      toast({ title: 'Failed to create exam', description: error.message, variant: 'destructive' });
+      return;
+    }
+
+    await logAudit('create', 'exam', `Created exam for course: ${course.title}`, {}, newExam.id);
+    toast({ title: 'Exam created & linked!', description: 'Redirecting to exam manager...' });
+    router.push(`/exams/${newExam.id}`);
+  }
 
   async function deleteCourse(id: string) {
     if (!confirm('Delete this course and all its materials?')) return;
@@ -100,8 +134,8 @@ export default function TrainingLibraryPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Training Library"
-        description={`${courses.length} courses available`}
+        title="Training Library & Course Management"
+        description={`${courses.length} courses available. Manage training materials and link exams.`}
         actions={canEdit ? <Button onClick={() => { setEditing(null); setEditOpen(true); }} size="sm" className="gap-1"><Plus className="h-4 w-4" /> Add Course</Button> : undefined}
       />
 
@@ -109,15 +143,23 @@ export default function TrainingLibraryPage() {
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
         {filtered.map((c) => (
-          <Card key={c.id} className="flex flex-col transition-shadow hover:shadow-md">
+          <Card key={c.id} className="flex flex-col transition-shadow hover:shadow-md border-border/60">
             <CardHeader>
               <div className="flex items-start justify-between gap-2">
                 <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 text-primary">
                   <BookOpen className="h-5 w-5" />
                 </div>
-                <Badge variant="outline" className="text-[10px]">{TRAINING_FREQUENCY_LABELS[c.frequency]}</Badge>
+                <div className="flex items-center gap-1">
+                  {c.exam ? (
+                    <Badge variant="secondary" className="bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300 text-[10px] gap-1">
+                      <ClipboardCheck className="h-3 w-3" /> Exam Linked
+                    </Badge>
+                  ) : (
+                    <Badge variant="outline" className="text-[10px]">{TRAINING_FREQUENCY_LABELS[c.frequency]}</Badge>
+                  )}
+                </div>
               </div>
-              <CardTitle className="text-base leading-tight">{c.title}</CardTitle>
+              <CardTitle className="text-base leading-tight mt-2">{c.title}</CardTitle>
               <CardDescription className="line-clamp-2 text-xs">{c.description}</CardDescription>
             </CardHeader>
             <CardContent className="flex flex-1 flex-col gap-3">
@@ -144,12 +186,42 @@ export default function TrainingLibraryPage() {
                   })}
                 </div>
               )}
-              <div className="mt-auto flex items-center justify-between pt-2">
-                <span className="text-xs text-muted-foreground">Pass: {c.pass_percentage}%</span>
+
+              {/* Exam Actions Section */}
+              <div className="mt-auto pt-3 border-t border-border/40 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-muted-foreground">Pass Mark: {c.pass_percentage}%</span>
+                  {canEdit && (
+                    <div className="flex gap-1">
+                      <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => { setEditing(c); setEditOpen(true); }} title="Edit Course"><Edit className="h-3.5 w-3.5" /></Button>
+                      <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-destructive" onClick={() => deleteCourse(c.id)} title="Delete Course"><Trash2 className="h-3.5 w-3.5" /></Button>
+                    </div>
+                  )}
+                </div>
+
                 {canEdit && (
-                  <div className="flex gap-1">
-                    <Button size="sm" variant="ghost" className="h-8 w-8 p-0" onClick={() => { setEditing(c); setEditOpen(true); }}><Edit className="h-4 w-4" /></Button>
-                    <Button size="sm" variant="ghost" className="h-8 w-8 p-0 text-destructive" onClick={() => deleteCourse(c.id)}><Trash2 className="h-4 w-4" /></Button>
+                  <div>
+                    {c.exam ? (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="w-full h-8 text-xs gap-1.5 border-emerald-500/30 text-emerald-700 hover:bg-emerald-50 dark:text-emerald-300 dark:hover:bg-emerald-950/40"
+                        onClick={() => router.push(`/exams/${c.exam?.id}`)}
+                      >
+                        <Settings className="h-3.5 w-3.5" /> Manage Exam ({c.exam.title})
+                      </Button>
+                    ) : (
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        className="w-full h-8 text-xs gap-1.5 bg-primary/10 text-primary hover:bg-primary/20"
+                        onClick={() => createExamForCourse(c)}
+                        disabled={creatingExamCourseId === c.id}
+                      >
+                        <Sparkles className="h-3.5 w-3.5" />
+                        {creatingExamCourseId === c.id ? 'Creating Exam...' : '+ Add Exam to Course'}
+                      </Button>
+                    )}
                   </div>
                 )}
               </div>
@@ -166,8 +238,10 @@ export default function TrainingLibraryPage() {
 function CourseFormDialog({ open, onOpenChange, course, plants, onSaved }: {
   open: boolean; onOpenChange: (o: boolean) => void; course: Course | null; plants: Plant[]; onSaved: () => void;
 }) {
+  const router = useRouter();
   const { toast } = useToast();
   const [saving, setSaving] = useState(false);
+  const [createExamChecked, setCreateExamChecked] = useState(true);
   const [form, setForm] = useState({
     title: '', description: '', duration_hours: 1, language: 'English', category: '',
     frequency: 'annual' as TrainingFrequency, trainer: '', pass_percentage: 70, is_mandatory: true,
@@ -178,97 +252,158 @@ function CourseFormDialog({ open, onOpenChange, course, plants, onSaved }: {
     if (course) {
       setForm({
         title: course.title, description: course.description ?? '', duration_hours: course.duration_hours ?? 1,
-        language: course.language ?? 'English', category: course.category ?? '',
-        frequency: course.frequency, trainer: course.trainer ?? '', pass_percentage: course.pass_percentage,
-        is_mandatory: course.is_mandatory ?? true,
+        language: course.language ?? 'English', category: course.category ?? '', frequency: course.frequency,
+        trainer: course.trainer ?? '', pass_percentage: course.pass_percentage ?? 70, is_mandatory: course.is_mandatory ?? true,
+      });
+      // Load plant relations
+      supabase.from('plant_courses').select('plant_id').eq('course_id', course.id).then(({ data }) => {
+        setSelectedPlants((data ?? []).map((x: { plant_id: string }) => x.plant_id));
       });
     } else {
-      setForm({ title: '', description: '', duration_hours: 1, language: 'English', category: '', frequency: 'annual', trainer: '', pass_percentage: 70, is_mandatory: true });
+      setForm({
+        title: '', description: '', duration_hours: 1, language: 'English', category: 'General Safety',
+        frequency: 'annual', trainer: '', pass_percentage: 70, is_mandatory: true,
+      });
+      setSelectedPlants([]);
+      setCreateExamChecked(true);
     }
-  }, [course, open]);
+  }, [course]);
 
   async function save() {
+    if (!form.title.trim()) { toast({ title: 'Title required', variant: 'destructive' }); return; }
     setSaving(true);
-    try {
-      const payload = {
-        ...form,
-        duration_hours: Number(form.duration_hours),
-        pass_percentage: Number(form.pass_percentage),
-      };
-      let id = course?.id;
-      if (course) {
-        const { error } = await supabase.from('courses').update(payload).eq('id', course.id);
-        if (error) throw error;
-        await logAudit('update', 'course', `Updated course ${form.title}`, {}, course.id);
-      } else {
-        const { data, error } = await supabase.from('courses').insert(payload).select().single();
-        if (error) throw error;
-        id = data.id;
-        await logAudit('create', 'course', `Created course ${form.title}`, {}, data.id);
-      }
-      // Sync plant requirements
-      if (id) {
-        await supabase.from('plant_courses').delete().eq('course_id', id);
-        if (selectedPlants.length) {
-          await supabase.from('plant_courses').insert(selectedPlants.map((pid) => ({ plant_id: pid, course_id: id })));
+    let savedCourseId = course?.id;
+
+    if (course) {
+      const { error } = await supabase.from('courses').update(form).eq('id', course.id);
+      if (error) { toast({ title: 'Failed', description: error.message, variant: 'destructive' }); setSaving(false); return; }
+    } else {
+      const { data: created, error } = await supabase.from('courses').insert(form).select().single();
+      if (error) { toast({ title: 'Failed', description: error.message, variant: 'destructive' }); setSaving(false); return; }
+      savedCourseId = created.id;
+
+      // Automatically create linked exam if checked
+      if (createExamChecked) {
+        const { data: newExam } = await supabase.from('exams').insert({
+          title: `${form.title} Assessment Exam`,
+          description: `Exam evaluation for ${form.title}`,
+          course_id: savedCourseId,
+          pass_percentage: form.pass_percentage ?? 70,
+          time_limit_minutes: 30,
+          is_active: true,
+          randomize_questions: true,
+        }).select().single();
+
+        if (newExam) {
+          toast({ title: 'Course and Exam created!', description: 'Navigating to configure exam questions.' });
+          onOpenChange(false);
+          onSaved();
+          router.push(`/exams/${newExam.id}`);
+          return;
         }
       }
-      toast({ title: course ? 'Course updated' : 'Course created' });
-      onOpenChange(false);
-      onSaved();
-    } catch (e) {
-      toast({ title: 'Failed', description: (e as Error).message, variant: 'destructive' });
-    } finally {
-      setSaving(false);
     }
+
+    // Update plant connections
+    if (savedCourseId) {
+      await supabase.from('plant_courses').delete().eq('course_id', savedCourseId);
+      if (selectedPlants.length) {
+        await supabase.from('plant_courses').insert(selectedPlants.map((pId) => ({ course_id: savedCourseId!, plant_id: pId })));
+      }
+    }
+
+    await logAudit(course ? 'update' : 'create', 'course', `${course ? 'Updated' : 'Created'} course: ${form.title}`, {}, savedCourseId);
+    toast({ title: course ? 'Course updated' : 'Course created' });
+    setSaving(false);
+    onOpenChange(false);
+    onSaved();
   }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-lg">
         <DialogHeader>
-          <DialogTitle>{course ? 'Edit Course' : 'Add Course'}</DialogTitle>
-          <DialogDescription>{course ? 'Update course details.' : 'Create a new training course.'}</DialogDescription>
+          <DialogTitle>{course ? 'Edit Course' : 'Create New Course'}</DialogTitle>
+          <DialogDescription>Add course info and configure linked exams.</DialogDescription>
         </DialogHeader>
-        <div className="grid gap-3">
-          <div><Label className="text-xs">Title</Label><Input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} /></div>
-          <div><Label className="text-xs">Description</Label><Textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></div>
+        <div className="grid gap-3 py-2">
+          <div>
+            <Label className="text-xs">Course Title *</Label>
+            <Input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="e.g. Chemical Hazard Awareness" />
+          </div>
+          <div>
+            <Label className="text-xs">Description</Label>
+            <Textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={2} />
+          </div>
           <div className="grid grid-cols-2 gap-3">
-            <div><Label className="text-xs">Duration (hours)</Label><Input type="number" min={1} value={form.duration_hours} onChange={(e) => setForm({ ...form, duration_hours: Number(e.target.value) })} /></div>
-            <div><Label className="text-xs">Language</Label><Input value={form.language} onChange={(e) => setForm({ ...form, language: e.target.value })} /></div>
-            <div><Label className="text-xs">Category</Label><Input value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} placeholder="e.g. Safety, Hazmat" /></div>
+            <div>
+              <Label className="text-xs">Category</Label>
+              <Input value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} placeholder="e.g. Dangerous Goods" />
+            </div>
+            <div>
+              <Label className="text-xs">Language</Label>
+              <Input value={form.language} onChange={(e) => setForm({ ...form, language: e.target.value })} />
+            </div>
+          </div>
+          <div className="grid grid-cols-3 gap-3">
             <div>
               <Label className="text-xs">Frequency</Label>
-              <Select value={form.frequency} onValueChange={(v) => setForm({ ...form, frequency: v as TrainingFrequency })}>
+              <Select value={form.frequency} onValueChange={(val) => setForm({ ...form, frequency: val as TrainingFrequency })}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {Object.entries(TRAINING_FREQUENCY_LABELS).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}
+                  {Object.keys(TRAINING_FREQUENCY_LABELS).map((k) => <SelectItem key={k} value={k}>{TRAINING_FREQUENCY_LABELS[k]}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
-            <div><Label className="text-xs">Trainer</Label><Input value={form.trainer} onChange={(e) => setForm({ ...form, trainer: e.target.value })} /></div>
-            <div><Label className="text-xs">Pass %</Label><Input type="number" min={1} max={100} value={form.pass_percentage} onChange={(e) => setForm({ ...form, pass_percentage: Number(e.target.value) })} /></div>
-          </div>
-          <div className="flex items-center gap-2">
-            <Checkbox id="mand" checked={form.is_mandatory} onCheckedChange={(c) => setForm({ ...form, is_mandatory: c === true })} />
-            <Label htmlFor="mand" className="text-xs">Mandatory</Label>
-          </div>
-          <div>
-            <Label className="text-xs mb-1.5 block">Plant Requirements</Label>
-            <div className="flex flex-wrap gap-3 rounded-lg border p-3">
-              {plants.map((p) => (
-                <div key={p.id} className="flex items-center gap-1.5">
-                  <Checkbox id={`p-${p.id}`} checked={selectedPlants.includes(p.id)} onCheckedChange={(c) => {
-                    if (c === true) setSelectedPlants([...selectedPlants, p.id]);
-                    else setSelectedPlants(selectedPlants.filter((x) => x !== p.id));
-                  }} />
-                  <Label htmlFor={`p-${p.id}`} className="text-xs cursor-pointer">{p.name}</Label>
-                </div>
-              ))}
+            <div>
+              <Label className="text-xs">Duration (hrs)</Label>
+              <Input type="number" value={form.duration_hours} onChange={(e) => setForm({ ...form, duration_hours: Number(e.target.value) })} />
+            </div>
+            <div>
+              <Label className="text-xs">Pass Mark (%)</Label>
+              <Input type="number" value={form.pass_percentage} onChange={(e) => setForm({ ...form, pass_percentage: Number(e.target.value) })} />
             </div>
           </div>
+          <div>
+            <Label className="text-xs">Trainer</Label>
+            <Input value={form.trainer} onChange={(e) => setForm({ ...form, trainer: e.target.value })} placeholder="Lead instructor name" />
+          </div>
+
+          {plants.length > 0 && (
+            <div>
+              <Label className="text-xs mb-1 block">Plant Requirements</Label>
+              <div className="flex flex-wrap gap-2 rounded-md border p-2">
+                {plants.map((p) => (
+                  <div key={p.id} className="flex items-center gap-1 text-xs">
+                    <Checkbox
+                      id={`p-${p.id}`}
+                      checked={selectedPlants.includes(p.id)}
+                      onCheckedChange={(c) => setSelectedPlants((prev) => c ? [...prev, p.id] : prev.filter((id) => id !== p.id))}
+                    />
+                    <label htmlFor={`p-${p.id}`} className="cursor-pointer">{p.code}</label>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {!course && (
+            <div className="flex items-center gap-2 rounded-lg border border-primary/20 bg-primary/5 p-3 text-xs">
+              <Checkbox
+                id="create-exam-check"
+                checked={createExamChecked}
+                onCheckedChange={(c) => setCreateExamChecked(!!c)}
+              />
+              <label htmlFor="create-exam-check" className="cursor-pointer font-medium text-foreground">
+                Automatically create and link an Evaluation Exam for this course
+              </label>
+            </div>
+          )}
         </div>
-        <DialogFooter><Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button><Button onClick={save} disabled={saving}>Save</Button></DialogFooter>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button onClick={save} disabled={saving}>{saving ? 'Saving...' : 'Save Course'}</Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );
