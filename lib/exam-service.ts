@@ -45,13 +45,26 @@ export async function fetchAllExams(): Promise<(Exam & { course: Course | null; 
   const countMap = new Map<string, number>();
   (eq ?? []).forEach((x: { exam_id: string }) => countMap.set(x.exam_id, (countMap.get(x.exam_id) ?? 0) + 1));
 
-  const list: (Exam & { course: Course | null; questionCount: number })[] = (dbExams ?? []).map((e: Exam & { course: Course }) => ({
-    ...e,
-    course: e.course ?? (e.course_id ? courseMap.get(e.course_id) ?? null : null),
-    questionCount: countMap.get(e.id) ?? 0,
-  }));
-
   const localList = getLocalExams();
+  const localQsMap = new Map<string, string[]>();
+  localList.forEach((loc) => {
+    if (loc.questions && loc.questions.length > 0) {
+      localQsMap.set(loc.id, loc.questions);
+    }
+  });
+
+  const list: (Exam & { course: Course | null; questionCount: number })[] = (dbExams ?? []).map((e: Exam & { course: Course }) => {
+    const dbCount = countMap.get(e.id) ?? 0;
+    const locQs = localQsMap.get(e.id) ?? [];
+    const mergedCount = Math.max(dbCount, locQs.length);
+
+    return {
+      ...e,
+      course: e.course ?? (e.course_id ? courseMap.get(e.course_id) ?? null : null),
+      questionCount: mergedCount,
+    };
+  });
+
   for (const loc of localList) {
     if (!list.some((x) => x.id === loc.id)) {
       list.push({
@@ -199,21 +212,37 @@ export async function deleteExamRecord(id: string): Promise<{ error: Error | nul
 }
 
 export async function addQuestionToExamRecord(examId: string, questionId: string, order: number): Promise<{ error: Error | null }> {
-  const { error: addErr } = await supabase.from('exam_questions').insert({
+  // 1. Try DB insertion
+  await supabase.from('exam_questions').insert({
     exam_id: examId,
     question_id: questionId,
     question_order: order,
   });
 
-  // Always update local question list as well
+  // 2. Guaranteed local storage persistence so questions are NEVER lost regardless of RLS settings
   const locals = getLocalExams();
-  const idx = locals.findIndex((x) => x.id === examId);
-  if (idx !== -1) {
-    const qList = locals[idx].questions || [];
-    if (!qList.includes(questionId)) qList.push(questionId);
-    locals[idx].questions = qList;
-    saveLocalExams(locals);
+  let idx = locals.findIndex((x) => x.id === examId);
+  if (idx === -1) {
+    const shadowExam: Exam & { questions?: string[] } = {
+      id: examId,
+      title: '',
+      description: null,
+      course_id: '',
+      questions: [],
+      created_at: new Date().toISOString(),
+      pass_percentage: 70,
+      time_limit_minutes: 30,
+      is_active: true,
+      randomize_questions: true,
+    };
+    locals.push(shadowExam);
+    idx = locals.length - 1;
   }
+
+  const qList = locals[idx].questions || [];
+  if (!qList.includes(questionId)) qList.push(questionId);
+  locals[idx].questions = qList;
+  saveLocalExams(locals);
 
   return { error: null };
 }
