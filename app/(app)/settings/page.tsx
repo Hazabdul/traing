@@ -3,11 +3,12 @@
 import { useEffect, useState, useCallback } from 'react';
 import { supabase } from '@/lib/supabase-client';
 import { useAuth } from '@/lib/auth-context';
-import type { SystemSettings } from '@/lib/database-types';
+import type { SystemSettings, Plant } from '@/lib/database-types';
 import { PageHeader } from '@/components/page-header';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -17,7 +18,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
 } from '@/components/ui/dialog';
 import {
-  Save, Clock, Award, Shield, Database, Trash2, RefreshCw, AlertTriangle, Search, CheckCircle2, ShieldAlert, Settings as SettingsIcon, Plus, Edit2, Check, X,
+  Save, Clock, Award, Shield, Database, Trash2, RefreshCw, AlertTriangle, Search, CheckCircle2, ShieldAlert, Settings as SettingsIcon, Plus, Edit2, Check, X, Factory, Building2,
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { logAudit } from '@/lib/audit';
@@ -125,6 +126,11 @@ export default function SettingsPage() {
   const [bandModalOpen, setBandModalOpen] = useState(false);
   const [editingBand, setEditingBand] = useState<CustomBand | null>(null);
 
+  // Industrial Plants state
+  const [plants, setPlants] = useState<Plant[]>([]);
+  const [plantModalOpen, setPlantModalOpen] = useState(false);
+  const [editingPlant, setEditingPlant] = useState<Plant | null>(null);
+
   const [confirmTable, setConfirmTable] = useState<TableMeta | null>(null);
   const [confirmPurgeAll, setConfirmPurgeAll] = useState(false);
   const [clearing, setClearing] = useState(false);
@@ -156,10 +162,27 @@ export default function SettingsPage() {
     toast({ title: `Rating Band ${code} deleted` });
   }
 
+  async function handleDeletePlant(plant: Plant) {
+    if (!confirm(`Are you sure you want to delete Industrial Plant "${plant.name}" (${plant.code})?`)) return;
+    await supabase.from('plant_courses').delete().eq('plant_id', plant.id);
+    const { error } = await supabase.from('plants').delete().eq('id', plant.id);
+    if (error) {
+      toast({ title: 'Failed to delete plant', description: error.message, variant: 'destructive' });
+      return;
+    }
+    await logAudit('delete', 'plant', `Deleted plant: ${plant.name}`);
+    toast({ title: 'Industrial Plant deleted' });
+    load();
+  }
+
   const load = useCallback(async () => {
     setLoading(true);
-    const { data } = await supabase.from('system_settings').select('*').eq('id', 1).maybeSingle();
-    setSettings(data as SystemSettings | null);
+    const [{ data: sysData }, { data: pData }] = await Promise.all([
+      supabase.from('system_settings').select('*').eq('id', 1).maybeSingle(),
+      supabase.from('plants').select('*').order('name'),
+    ]);
+    setSettings(sysData as SystemSettings | null);
+    setPlants((pData ?? []) as Plant[]);
     setLoading(false);
   }, []);
 
@@ -301,6 +324,9 @@ export default function SettingsPage() {
           <TabsTrigger value="settings" className="gap-1.5">
             <SettingsIcon className="h-4 w-4 text-primary" /> Configuration
           </TabsTrigger>
+          <TabsTrigger value="plants" className="gap-1.5">
+            <Factory className="h-4 w-4 text-amber-500" /> Industrial Plants ({plants.length})
+          </TabsTrigger>
           <TabsTrigger value="bands" className="gap-1.5">
             <Award className="h-4 w-4 text-emerald-500" /> Rating Bands & Rules
           </TabsTrigger>
@@ -358,6 +384,76 @@ export default function SettingsPage() {
               </CardContent>
             </Card>
           </div>
+        </TabsContent>
+
+        {/* ── Tab: Industrial Plants ─────────────────────────────────────── */}
+        <TabsContent value="plants">
+          <Card>
+            <CardHeader className="flex-row items-center justify-between space-y-0 pb-3">
+              <div>
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Factory className="h-5 w-5 text-amber-500" /> Industrial Plants Management
+                </CardTitle>
+                <CardDescription className="mt-1">Add, edit, or delete industrial plant compliance locations (e.g. SABIC, TASNEE, ARAMCO).</CardDescription>
+              </div>
+
+              {isAdmin && (
+                <Button
+                  size="sm"
+                  onClick={() => {
+                    setEditingPlant(null);
+                    setPlantModalOpen(true);
+                  }}
+                  className="gap-1 text-xs font-bold"
+                >
+                  <Plus className="h-4 w-4" /> Add Plant
+                </Button>
+              )}
+            </CardHeader>
+            <CardContent className="space-y-4 pt-2">
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
+                {plants.length === 0 ? (
+                  <p className="col-span-full py-12 text-center text-xs text-muted-foreground">No industrial plants defined yet. Click "Add Plant" to create one.</p>
+                ) : (
+                  plants.map((p) => (
+                    <div key={p.id} className="flex flex-col justify-between rounded-xl border p-4 bg-card space-y-3 shadow-xs">
+                      <div>
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-sm font-bold text-foreground truncate">{p.name}</span>
+                          <Badge variant="outline" className="text-[10px] font-mono font-bold text-primary border-primary/30 shrink-0">{p.code}</Badge>
+                        </div>
+                        {p.description && <p className="text-xs text-muted-foreground mt-1.5 line-clamp-2">{p.description}</p>}
+                      </div>
+
+                      {isAdmin && (
+                        <div className="flex items-center justify-end gap-1 border-t pt-2.5">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-8 text-xs gap-1 text-muted-foreground hover:text-foreground"
+                            onClick={() => {
+                              setEditingPlant(p);
+                              setPlantModalOpen(true);
+                            }}
+                          >
+                            <Edit2 className="h-3.5 w-3.5" /> Edit
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-8 text-xs gap-1 text-destructive hover:bg-destructive/10"
+                            onClick={() => handleDeletePlant(p)}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" /> Delete
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  ))
+                )}
+              </div>
+            </CardContent>
+          </Card>
         </TabsContent>
 
         {/* ── Tab 2: Rating Bands & Rules ──────────────────────────────── */}
@@ -636,7 +732,109 @@ export default function SettingsPage() {
           onSave={handleSaveBand}
         />
       )}
+
+      {/* Edit / Add Plant Modal */}
+      <SettingsPlantModal
+        open={plantModalOpen}
+        onOpenChange={(open) => {
+          setPlantModalOpen(open);
+          if (!open) setEditingPlant(null);
+        }}
+        plant={editingPlant}
+        onSaved={load}
+      />
     </div>
+  );
+}
+
+function SettingsPlantModal({ open, onOpenChange, plant, onSaved }: {
+  open: boolean; onOpenChange: (o: boolean) => void; plant: Plant | null; onSaved: () => void;
+}) {
+  const { toast } = useToast();
+  const [saving, setSaving] = useState(false);
+  const [name, setName] = useState('');
+  const [code, setCode] = useState('');
+  const [description, setDescription] = useState('');
+
+  useEffect(() => {
+    if (plant) {
+      setName(plant.name);
+      setCode(plant.code);
+      setDescription(plant.description ?? '');
+    } else {
+      setName(''); setCode(''); setDescription('');
+    }
+  }, [plant, open]);
+
+  async function savePlant() {
+    if (!name.trim() || !code.trim()) {
+      toast({ title: 'Plant name and code are required', variant: 'destructive' });
+      return;
+    }
+    setSaving(true);
+
+    if (plant) {
+      const { error } = await supabase.from('plants').update({
+        name: name.trim(),
+        code: code.trim().toUpperCase(),
+        description: description.trim() || null,
+      }).eq('id', plant.id);
+
+      setSaving(false);
+      if (error) {
+        toast({ title: 'Failed to update plant', description: error.message, variant: 'destructive' });
+        return;
+      }
+      await logAudit('update', 'plant', `Updated industrial plant: ${name} (${code})`, {}, plant.id);
+      toast({ title: 'Industrial Plant updated successfully!' });
+    } else {
+      const { error } = await supabase.from('plants').insert({
+        name: name.trim(),
+        code: code.trim().toUpperCase(),
+        description: description.trim() || null,
+      });
+
+      setSaving(false);
+      if (error) {
+        toast({ title: 'Failed to create plant', description: error.message, variant: 'destructive' });
+        return;
+      }
+      await logAudit('create', 'plant', `Created industrial plant: ${name} (${code})`);
+      toast({ title: 'Industrial Plant added successfully!' });
+    }
+
+    setName(''); setCode(''); setDescription('');
+    onOpenChange(false);
+    onSaved();
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{plant ? `Edit Plant: ${plant.code}` : 'Add Industrial Plant'}</DialogTitle>
+          <DialogDescription>Define an industrial plant requirement (e.g., SABIC Jubail, TASNEE Yanbu, ARAMCO).</DialogDescription>
+        </DialogHeader>
+        <div className="grid gap-3 py-2">
+          <div>
+            <Label className="text-xs font-bold">Plant Name *</Label>
+            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. SABIC Jubail Industrial Complex" />
+          </div>
+          <div>
+            <Label className="text-xs font-bold">Plant Code *</Label>
+            <Input value={code} onChange={(e) => setCode(e.target.value)} placeholder="e.g. SAB-JUB" />
+          </div>
+          <div>
+            <Label className="text-xs font-bold">Description / Scope</Label>
+            <Textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Site specific requirements, safety guidelines..." rows={2} />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button onClick={savePlant} disabled={saving}>{saving ? 'Saving...' : plant ? 'Save Changes' : 'Add Plant'}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
