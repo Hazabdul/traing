@@ -19,6 +19,8 @@ import { fetchExamDetailById } from '@/lib/exam-service';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Languages, Globe, Share2, Copy, MessageCircle } from 'lucide-react';
 
+import { translateText } from '@/lib/translator';
+
 interface ExamData {
   exam: Exam;
   course: Course | null;
@@ -61,7 +63,7 @@ const DICT: Record<LangKey, {
     submit: 'Submit Exam', submitting: 'Submitting…', timeRemaining: 'Time Remaining',
     passedTitle: 'Exam Passed!', failedTitle: 'Exam Failed',
     passedMsg: 'A certificate has been generated and your training marked complete.',
-    failedMsg: 'You did not meet the pass mark. Please review the material and retry.',
+    failedMsg: 'You did not meet the material and retry.',
     retry: 'Retry Exam', backToExams: 'Back to Exams', viewCert: 'View Certificate',
     score: 'Score', correct: 'Correct', finalizing: 'Submitting will finalize your attempt.',
     share: 'Share Exam', copyLink: 'Copy Link', whatsApp: 'WhatsApp',
@@ -134,8 +136,25 @@ export default function TakeExamPage() {
   const [result, setResult] = useState<{ passed: boolean; percentage: number; correct: number; total: number } | null>(null);
   const [timeLeft, setTimeLeft] = useState(0);
   const [lang, setLang] = useState<LangKey>('en');
+  const [translatedQuestions, setTranslatedQuestions] = useState<Record<string, { text: string; options: string[] }>>({});
 
   const t = DICT[lang];
+
+  // Dynamic Translation for Question texts & Options
+  useEffect(() => {
+    if (!exam) return;
+    const currentExam = exam;
+    async function translateAll() {
+      const map: Record<string, { text: string; options: string[] }> = {};
+      for (const q of currentExam.questions) {
+        const transText = await translateText(q.question_text, lang);
+        const transOpts = await Promise.all(q.options.map((opt) => translateText(opt, lang)));
+        map[q.id] = { text: transText, options: transOpts };
+      }
+      setTranslatedQuestions(map);
+    }
+    translateAll();
+  }, [lang, exam]);
 
   const load = useCallback(async () => {
     const examId = params.id;
@@ -379,19 +398,23 @@ export default function TakeExamPage() {
             <div className="space-y-6">
               {exam.questions.map((q, idx) => {
                 const isMulti = q.question_type === 'multiple_select';
+                const qTrans = translatedQuestions[q.id];
+                const qText = qTrans?.text || q.question_text;
+                const displayOpts = qTrans?.options || q.options;
+
                 return (
                   <div key={q.id} className="rounded-lg border p-4">
                     <div className="mb-3 flex items-start gap-2">
                       <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-bold text-primary">{idx + 1}</span>
                       <div>
-                        <p className="text-sm font-medium">{q.question_text}</p>
+                        <p className="text-sm font-medium">{qText}</p>
                         <p className="mt-0.5 text-[10px] text-muted-foreground uppercase font-bold tracking-wider">{isMulti ? t.multiChoice : t.singleChoice}</p>
                       </div>
                     </div>
 
                     {isMulti ? (
                       <div className="space-y-2 pl-8">
-                        {q.options.map((opt, i) => (
+                        {displayOpts.map((opt, i) => (
                           <div key={i} className="flex items-center gap-2">
                             <Checkbox id={`${q.id}-${i}`} checked={(answers[q.id] ?? []).includes(i)} onCheckedChange={() => setAnswer(q.id, i, true)} />
                             <Label htmlFor={`${q.id}-${i}`} className="text-sm cursor-pointer font-normal">{opt}</Label>
@@ -400,7 +423,7 @@ export default function TakeExamPage() {
                       </div>
                     ) : (
                       <RadioGroup value={String((answers[q.id] ?? [])[0] ?? '')} onValueChange={(v) => setAnswer(q.id, Number(v), false)} className="space-y-2 pl-8">
-                        {q.options.map((opt, i) => (
+                        {displayOpts.map((opt, i) => (
                           <div key={i} className="flex items-center gap-2">
                             <RadioGroupItem value={String(i)} id={`${q.id}-${i}`} />
                             <Label htmlFor={`${q.id}-${i}`} className="text-sm cursor-pointer font-normal">{opt}</Label>

@@ -14,6 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { AlertCircle, Clock, CheckCircle2, XCircle, AlertTriangle, Shield, Languages, UserCheck, Sparkles } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { fetchExamDetailById } from '@/lib/exam-service';
+import { translateText, type SupportedLanguage } from '@/lib/translator';
 
 interface ExamData {
   exam: Exam;
@@ -148,8 +149,25 @@ function PublicTakeExamContent() {
   const [result, setResult] = useState<{ passed: boolean; percentage: number; correct: number; total: number } | null>(null);
   const [timeLeft, setTimeLeft] = useState(0);
   const [lang, setLang] = useState<LangKey>('en');
+  const [translatedQuestions, setTranslatedQuestions] = useState<Record<string, { text: string; options: string[] }>>({});
 
   const t = DICT[lang];
+
+  // Dynamic Translation for Question texts & Options
+  useEffect(() => {
+    if (!examData) return;
+    const currentExamData = examData;
+    async function translateAll() {
+      const map: Record<string, { text: string; options: string[] }> = {};
+      for (const q of currentExamData.questions) {
+        const transText = await translateText(q.question_text, lang);
+        const transOpts = await Promise.all(q.options.map((opt) => translateText(opt, lang)));
+        map[q.id] = { text: transText, options: transOpts };
+      }
+      setTranslatedQuestions(map);
+    }
+    translateAll();
+  }, [lang, examData]);
 
   // Load Exam and Drivers
   const load = useCallback(async () => {
@@ -477,19 +495,23 @@ function PublicTakeExamContent() {
                   <div className="space-y-6">
                     {examData.questions.map((q, idx) => {
                       const isMulti = q.question_type === 'multiple_select';
+                      const qTrans = translatedQuestions[q.id];
+                      const qText = qTrans?.text || q.question_text;
+                      const displayOpts = qTrans?.options || q.options;
+
                       return (
                         <div key={q.id} className="rounded-xl border bg-card p-4 space-y-3 shadow-xs">
                           <div className="flex items-start gap-2.5">
                             <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-bold text-primary">{idx + 1}</span>
                             <div>
-                              <p className="text-sm font-semibold">{q.question_text}</p>
+                              <p className="text-sm font-semibold">{qText}</p>
                               <p className="mt-0.5 text-[10px] text-muted-foreground uppercase font-bold tracking-wider">{isMulti ? t.multiChoice : t.singleChoice}</p>
                             </div>
                           </div>
 
                           {isMulti ? (
                             <div className="space-y-2 pl-8">
-                              {q.options.map((opt, i) => (
+                              {displayOpts.map((opt, i) => (
                                 <div key={i} className="flex items-center gap-2.5">
                                   <Checkbox id={`${q.id}-${i}`} checked={(answers[q.id] ?? []).includes(i)} onCheckedChange={() => setAnswer(q.id, i, true)} />
                                   <Label htmlFor={`${q.id}-${i}`} className="text-sm cursor-pointer font-normal">{opt}</Label>
@@ -498,7 +520,7 @@ function PublicTakeExamContent() {
                             </div>
                           ) : (
                             <RadioGroup value={String((answers[q.id] ?? [])[0] ?? '')} onValueChange={(v) => setAnswer(q.id, Number(v), false)} className="space-y-2 pl-8">
-                              {q.options.map((opt, i) => (
+                              {displayOpts.map((opt, i) => (
                                 <div key={i} className="flex items-center gap-2.5">
                                   <RadioGroupItem value={String(i)} id={`${q.id}-${i}`} />
                                   <Label htmlFor={`${q.id}-${i}`} className="text-sm cursor-pointer font-normal">{opt}</Label>
