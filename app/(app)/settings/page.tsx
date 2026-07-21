@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { supabase } from '@/lib/supabase-client';
+import { useAuth } from '@/lib/auth-context';
 import type { SystemSettings } from '@/lib/database-types';
 import { PageHeader } from '@/components/page-header';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -10,15 +11,68 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Save, Settings as SettingsIcon, Clock, Award, Shield } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
+} from '@/components/ui/dialog';
+import {
+  Save, Clock, Award, Shield, Database, Trash2, RefreshCw, AlertTriangle, Search, CheckCircle2, ShieldAlert, Settings as SettingsIcon,
+} from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { logAudit } from '@/lib/audit';
 
+interface TableMeta {
+  name: string;
+  label: string;
+  description: string;
+  category: 'core' | 'training' | 'exams' | 'incidents' | 'system';
+  primaryCol: string;
+}
+
+const MANAGED_TABLES: TableMeta[] = [
+  { name: 'drivers', label: 'Drivers Directory', description: 'Core driver profiles, license, employee IDs, and status', category: 'core', primaryCol: 'id' },
+  { name: 'branches', label: 'Branches', description: 'Logistics branch offices and locations', category: 'core', primaryCol: 'id' },
+  { name: 'plants', label: 'Industrial Plants', description: 'Plant definitions and compliance rules', category: 'core', primaryCol: 'id' },
+  { name: 'plant_courses', label: 'Plant Course Requirements', description: 'Required courses per industrial plant', category: 'core', primaryCol: 'plant_id' },
+
+  { name: 'courses', label: 'Course Library', description: 'Training courses, categories, and modules', category: 'training', primaryCol: 'id' },
+  { name: 'training_materials', label: 'Training Materials', description: 'Attached course files (PDFs, PPTs, Videos)', category: 'training', primaryCol: 'id' },
+  { name: 'trainings', label: 'Training Assignments', description: 'Assigned driver trainings, due dates, and progress', category: 'training', primaryCol: 'id' },
+
+  { name: 'exams', label: 'Examinations', description: 'Exam definitions, time limits, and thresholds', category: 'exams', primaryCol: 'id' },
+  { name: 'questions', label: 'Question Bank', description: 'Evaluation questions, choices, and correct answers', category: 'exams', primaryCol: 'id' },
+  { name: 'exam_questions', label: 'Exam Question Mappings', description: 'Questions attached to specific exams', category: 'exams', primaryCol: 'exam_id' },
+  { name: 'exam_attempts', label: 'Exam Results / Attempts', description: 'Completed exam submissions and scores', category: 'exams', primaryCol: 'id' },
+  { name: 'certificates', label: 'Issued Certificates', description: 'Generated certificates for passed exams', category: 'exams', primaryCol: 'id' },
+
+  { name: 'accidents', label: 'Accident Records', description: 'Recorded driver traffic accidents', category: 'incidents', primaryCol: 'id' },
+  { name: 'violations', label: 'Traffic Violations', description: 'Logged traffic fines and violations', category: 'incidents', primaryCol: 'id' },
+  { name: 'safety_warnings', label: 'Safety Warnings', description: 'Issued safety warnings and penalties', category: 'incidents', primaryCol: 'id' },
+  { name: 'behaviour_assessments', label: 'Behaviour Evaluations', description: 'Periodic driver performance assessments', category: 'incidents', primaryCol: 'id' },
+  { name: 'driver_ratings', label: 'Driver Rating Snapshots', description: 'Computed rating band history (D1-D4)', category: 'incidents', primaryCol: 'driver_id' },
+  { name: 'driver_documents', label: 'Driver Documents', description: 'Uploaded driver licenses, IDs, and certificates', category: 'incidents', primaryCol: 'id' },
+
+  { name: 'notifications', label: 'Notifications', description: 'In-app alert logs and dispatched notices', category: 'system', primaryCol: 'id' },
+  { name: 'audit_logs', label: 'Audit Logs', description: 'System event trails and administrative actions', category: 'system', primaryCol: 'id' },
+];
+
 export default function SettingsPage() {
   const { toast } = useToast();
+  const { profile } = useAuth();
+  const isAdmin = profile?.role === 'system_admin';
+
   const [settings, setSettings] = useState<SystemSettings | null>(null);
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
+
+  // Table management state
+  const [tableCounts, setTableCounts] = useState<Record<string, number>>({});
+  const [loadingCounts, setLoadingCounts] = useState(false);
+  const [tableSearch, setTableSearch] = useState('');
+  const [confirmTable, setConfirmTable] = useState<TableMeta | null>(null);
+  const [confirmPurgeAll, setConfirmPurgeAll] = useState(false);
+  const [clearing, setClearing] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -27,7 +81,25 @@ export default function SettingsPage() {
     setLoading(false);
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  const loadTableCounts = useCallback(async () => {
+    setLoadingCounts(true);
+    const countsMap: Record<string, number> = {};
+
+    await Promise.all(
+      MANAGED_TABLES.map(async (t) => {
+        const { data } = await supabase.from(t.name).select('*').limit(500);
+        countsMap[t.name] = data?.length ?? 0;
+      })
+    );
+
+    setTableCounts(countsMap);
+    setLoadingCounts(false);
+  }, []);
+
+  useEffect(() => {
+    load();
+    loadTableCounts();
+  }, [load, loadTableCounts]);
 
   async function save() {
     if (!settings) return;
@@ -48,56 +120,296 @@ export default function SettingsPage() {
     toast({ title: 'Settings saved', description: 'System configuration updated.' });
   }
 
+  async function clearSingleTable(table: TableMeta) {
+    setClearing(true);
+    const { error } = await supabase.from(table.name).delete().neq(table.primaryCol, '00000000-0000-0000-0000-000000000000');
+    setClearing(false);
+    setConfirmTable(null);
+
+    if (error) {
+      toast({ title: `Failed to clear ${table.label}`, description: error.message, variant: 'destructive' });
+      return;
+    }
+
+    if (table.name === 'questions') {
+      try { localStorage.removeItem('safefleet_local_questions_v1'); } catch {}
+    }
+
+    toast({ title: 'Table Cleared', description: `All records removed from ${table.label}.` });
+    await logAudit('delete', table.name, `Admin purged table ${table.name}`);
+    loadTableCounts();
+  }
+
+  async function purgeAllTables() {
+    setClearing(true);
+
+    const order = [
+      'certificates', 'exam_attempts', 'trainings', 'exam_questions', 'questions',
+      'exams', 'training_materials', 'courses', 'plant_courses', 'accidents',
+      'violations', 'safety_warnings', 'behaviour_assessments', 'driver_ratings',
+      'driver_documents', 'drivers', 'plants', 'branches', 'notifications', 'audit_logs'
+    ];
+
+    for (const tableName of order) {
+      const meta = MANAGED_TABLES.find((m) => m.name === tableName);
+      const col = meta?.primaryCol ?? 'id';
+      await supabase.from(tableName).delete().neq(col, '00000000-0000-0000-0000-000000000000');
+    }
+
+    try { localStorage.removeItem('safefleet_local_questions_v1'); } catch {}
+
+    setClearing(false);
+    setConfirmPurgeAll(false);
+    toast({ title: 'System Reset Complete', description: 'All database tables have been cleared.' });
+    await logAudit('delete', 'system', 'Admin executed Master Database Purge');
+    loadTableCounts();
+  }
+
   if (loading || !settings) {
     return <div className="space-y-4"><Skeleton className="h-10 w-48" /><Skeleton className="h-96 w-full" /></div>;
   }
 
+  const filteredTables = MANAGED_TABLES.filter((t) => {
+    if (!tableSearch) return true;
+    const q = tableSearch.toLowerCase();
+    return t.name.toLowerCase().includes(q) || t.label.toLowerCase().includes(q) || t.description.toLowerCase().includes(q);
+  });
+
+  const totalRecordCount = Object.values(tableCounts).reduce((acc, curr) => acc + curr, 0);
+
   return (
     <div className="space-y-6">
-      <PageHeader title="System Settings" description="Configure training frequencies, exam thresholds, and safety awards." actions={<Button onClick={save} disabled={saving} className="gap-1"><Save className="h-4 w-4" /> {saving ? 'Saving…' : 'Save Changes'}</Button>} />
+      <PageHeader
+        title="System Settings & Data Management"
+        description="Configure training cadence, pass thresholds, and manage database table records."
+        actions={
+          <Button onClick={save} disabled={saving} className="gap-1">
+            <Save className="h-4 w-4" /> {saving ? 'Saving…' : 'Save Settings'}
+          </Button>
+        }
+      />
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base flex items-center gap-2"><Clock className="h-4 w-4 text-primary" /> Training Frequencies</CardTitle>
-            <CardDescription>How often trainings are scheduled per rating band.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <NumberField label="Default Annual Training (months)" value={settings.annual_training_months} onChange={(v) => setSettings({ ...settings, annual_training_months: v })} min={1} max={24} />
-            <NumberField label="D2 Training Interval (months)" value={settings.d2_training_months} onChange={(v) => setSettings({ ...settings, d2_training_months: v })} min={1} max={12} />
-            <NumberField label="D3 Training Interval (months)" value={settings.d3_training_months} onChange={(v) => setSettings({ ...settings, d3_training_months: v })} min={1} max={12} />
-            <NumberField label="D4 Training Interval (months)" value={settings.d4_training_months} onChange={(v) => setSettings({ ...settings, d4_training_months: v })} min={1} max={12} />
-          </CardContent>
-        </Card>
+      <Tabs defaultValue="settings" className="space-y-4">
+        <TabsList className="flex h-auto flex-wrap gap-1 bg-muted/60 p-1">
+          <TabsTrigger value="settings" className="gap-1.5">
+            <SettingsIcon className="h-4 w-4 text-primary" /> Configuration
+          </TabsTrigger>
+          <TabsTrigger value="database" className="gap-1.5">
+            <Database className="h-4 w-4 text-amber-500" /> Database Management
+            {totalRecordCount > 0 && (
+              <Badge variant="secondary" className="ml-1 px-1.5 py-0 text-[10px] bg-amber-500/15 text-amber-600 font-bold">
+                {totalRecordCount}
+              </Badge>
+            )}
+          </TabsTrigger>
+        </TabsList>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base flex items-center gap-2"><Shield className="h-4 w-4 text-primary" /> Examination & Compliance</CardTitle>
-            <CardDescription>Exam and improvement thresholds.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <NumberField label="Exam Pass Percentage (%)" value={settings.exam_pass_percentage} onChange={(v) => setSettings({ ...settings, exam_pass_percentage: v })} min={1} max={100} />
-            <NumberField label="Exam Interval (months)" value={settings.exam_interval_months} onChange={(v) => setSettings({ ...settings, exam_interval_months: v })} min={1} max={12} />
-            <NumberField label="D3 Improvement Window (months)" value={settings.d3_improvement_months} onChange={(v) => setSettings({ ...settings, d3_improvement_months: v })} min={1} max={12} />
-          </CardContent>
-        </Card>
+        {/* ── Tab 1: System Settings ─────────────────────────────────────── */}
+        <TabsContent value="settings">
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base flex items-center gap-2"><Clock className="h-4 w-4 text-primary" /> Training Frequencies</CardTitle>
+                <CardDescription>How often trainings are scheduled per rating band.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <NumberField label="Default Annual Training (months)" value={settings.annual_training_months} onChange={(v) => setSettings({ ...settings, annual_training_months: v })} min={1} max={24} />
+                <NumberField label="D2 Training Interval (months)" value={settings.d2_training_months} onChange={(v) => setSettings({ ...settings, d2_training_months: v })} min={1} max={12} />
+                <NumberField label="D3 Training Interval (months)" value={settings.d3_training_months} onChange={(v) => setSettings({ ...settings, d3_training_months: v })} min={1} max={12} />
+                <NumberField label="D4 Training Interval (months)" value={settings.d4_training_months} onChange={(v) => setSettings({ ...settings, d4_training_months: v })} min={1} max={12} />
+              </CardContent>
+            </Card>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base flex items-center gap-2"><Award className="h-4 w-4 text-primary" /> Safety Awards</CardTitle>
-            <CardDescription>Eligibility configuration.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex items-center justify-between rounded-lg border p-3">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base flex items-center gap-2"><Shield className="h-4 w-4 text-primary" /> Examination & Compliance</CardTitle>
+                <CardDescription>Exam and improvement thresholds.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <NumberField label="Exam Pass Percentage (%)" value={settings.exam_pass_percentage} onChange={(v) => setSettings({ ...settings, exam_pass_percentage: v })} min={1} max={100} />
+                <NumberField label="Exam Interval (months)" value={settings.exam_interval_months} onChange={(v) => setSettings({ ...settings, exam_interval_months: v })} min={1} max={12} />
+                <NumberField label="D3 Improvement Window (months)" value={settings.d3_improvement_months} onChange={(v) => setSettings({ ...settings, d3_improvement_months: v })} min={1} max={12} />
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base flex items-center gap-2"><Award className="h-4 w-4 text-primary" /> Safety Awards</CardTitle>
+                <CardDescription>Eligibility configuration.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex items-center justify-between rounded-lg border p-3">
+                  <div>
+                    <Label className="text-sm font-medium">Safety Award Program</Label>
+                    <p className="text-xs text-muted-foreground">Enable D1 driver eligibility for safety awards.</p>
+                  </div>
+                  <Switch checked={settings.safety_award_enabled ?? false} onCheckedChange={(c) => setSettings({ ...settings, safety_award_enabled: c })} />
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+
+        {/* ── Tab 2: Database Table Management (Admin Only) ──────────── */}
+        <TabsContent value="database" className="space-y-4">
+          <Card className="border-amber-500/30">
+            <CardHeader className="flex-row items-center justify-between space-y-0 pb-3">
               <div>
-                <Label className="text-sm font-medium">Safety Award Program</Label>
-                <p className="text-xs text-muted-foreground">Enable D1 driver eligibility for safety awards.</p>
+                <CardTitle className="text-base flex items-center gap-2 text-foreground">
+                  <Database className="h-5 w-5 text-amber-500" /> Database Table Management
+                </CardTitle>
+                <CardDescription className="mt-1">
+                  Selectively clear specific tables or purge all operational data while preserving schema and columns.
+                </CardDescription>
               </div>
-              <Switch checked={settings.safety_award_enabled ?? false} onCheckedChange={(c) => setSettings({ ...settings, safety_award_enabled: c })} />
+
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={loadTableCounts}
+                  disabled={loadingCounts}
+                  className="gap-1.5 text-xs"
+                >
+                  <RefreshCw className={`h-3.5 w-3.5 ${loadingCounts ? 'animate-spin' : ''}`} /> Refresh Counts
+                </Button>
+
+                {isAdmin && (
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    onClick={() => setConfirmPurgeAll(true)}
+                    className="gap-1.5 text-xs font-bold"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" /> Purge All Tables
+                  </Button>
+                )}
+              </div>
+            </CardHeader>
+
+            <CardContent className="space-y-4 pt-2">
+              {!isAdmin ? (
+                <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 flex items-center gap-3 text-sm text-amber-800 dark:text-amber-300">
+                  <ShieldAlert className="h-5 w-5 shrink-0" />
+                  <span>Table purging is restricted to <strong>System Administrators</strong> only.</span>
+                </div>
+              ) : (
+                <>
+                  {/* Search Bar */}
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                    <Input
+                      value={tableSearch}
+                      onChange={(e) => setTableSearch(e.target.value)}
+                      placeholder="Search tables by name or description…"
+                      className="pl-8 h-9 text-xs"
+                    />
+                  </div>
+
+                  {/* Table Grid */}
+                  <div className="grid grid-cols-1 gap-2.5 md:grid-cols-2">
+                    {filteredTables.map((table) => {
+                      const count = tableCounts[table.name] ?? 0;
+                      const hasData = count > 0;
+
+                      return (
+                        <div
+                          key={table.name}
+                          className={`flex items-center justify-between gap-3 rounded-xl border p-3 transition-all ${
+                            hasData ? 'border-amber-500/30 bg-card hover:border-amber-500/50' : 'border-border/60 bg-muted/20'
+                          }`}
+                        >
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs font-bold font-mono text-foreground">{table.name}</span>
+                              <Badge
+                                variant="secondary"
+                                className={`text-[10px] font-bold px-1.5 py-0 ${
+                                  hasData ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400' : 'bg-emerald-500/10 text-emerald-600'
+                                }`}
+                              >
+                                {count} {count === 1 ? 'row' : 'rows'}
+                              </Badge>
+                            </div>
+                            <p className="text-xs font-medium text-foreground/80 mt-0.5 truncate">{table.label}</p>
+                            <p className="text-[11px] text-muted-foreground truncate">{table.description}</p>
+                          </div>
+
+                          <Button
+                            variant={hasData ? 'destructive' : 'outline'}
+                            size="sm"
+                            disabled={!hasData || clearing}
+                            onClick={() => setConfirmTable(table)}
+                            className="h-8 text-xs gap-1 shrink-0"
+                          >
+                            <Trash2 className="h-3 w-3" /> Clear
+                          </Button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
+
+      {/* Single Table Clear Confirmation Modal */}
+      <Dialog open={!!confirmTable} onOpenChange={(open) => !open && setConfirmTable(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-destructive/10 text-destructive mb-2">
+              <AlertTriangle className="h-6 w-6" />
             </div>
-          </CardContent>
-        </Card>
-      </div>
+            <DialogTitle className="text-center">Clear Table: {confirmTable?.name}</DialogTitle>
+            <DialogDescription className="text-center text-xs">
+              Are you sure you want to delete all rows from <strong>{confirmTable?.label}</strong> ({confirmTable?.name})?
+              The schema, columns, and indexes will remain intact.
+            </DialogDescription>
+          </DialogHeader>
+
+          <DialogFooter className="gap-2 sm:gap-0 mt-4">
+            <Button variant="outline" size="sm" onClick={() => setConfirmTable(null)}>Cancel</Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              disabled={clearing}
+              onClick={() => confirmTable && clearSingleTable(confirmTable)}
+            >
+              {clearing ? 'Clearing…' : 'Yes, Delete Table Rows'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Master Purge All Tables Confirmation Modal */}
+      <Dialog open={confirmPurgeAll} onOpenChange={setConfirmPurgeAll}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-destructive/10 text-destructive mb-2">
+              <Trash2 className="h-6 w-6" />
+            </div>
+            <DialogTitle className="text-center text-destructive">Master Database Purge</DialogTitle>
+            <DialogDescription className="text-center text-xs">
+              WARNING: This will delete ALL data across all 20 operational tables (drivers, courses, assignments, exams, certificates, and incidents).
+              Database structure, authentication accounts, and schema will be preserved.
+            </DialogDescription>
+          </DialogHeader>
+
+          <DialogFooter className="gap-2 sm:gap-0 mt-4">
+            <Button variant="outline" size="sm" onClick={() => setConfirmPurgeAll(false)}>Cancel</Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              disabled={clearing}
+              onClick={purgeAllTables}
+            >
+              {clearing ? 'Purging…' : 'Purge All Database Tables'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
