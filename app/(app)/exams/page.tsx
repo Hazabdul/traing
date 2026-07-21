@@ -18,11 +18,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
 } from '@/components/ui/dialog';
-import { ClipboardCheck, Clock, CheckCircle2, XCircle, Play, Plus, Settings, Copy, MessageCircle } from 'lucide-react';
+import { ClipboardCheck, Clock, CheckCircle2, XCircle, Play, Plus, Settings, Copy, MessageCircle, Trash2, AlertTriangle } from 'lucide-react';
 import { formatDateTime } from '@/lib/format';
 import { useToast } from '@/hooks/use-toast';
 import { logAudit } from '@/lib/audit';
-import { createExamRecord, fetchAllExams } from '@/lib/exam-service';
+import { createExamRecord, fetchAllExams, deleteExamRecord } from '@/lib/exam-service';
 
 export default function ExamsPage() {
   const { profile } = useAuth();
@@ -42,6 +42,9 @@ export default function ExamsPage() {
   const [courseId, setCourseId] = useState('');
   const [passPercentage, setPassPercentage] = useState('70');
   const [timeLimit, setTimeLimit] = useState('30');
+  // Delete Exam modal state
+  const [deleteExamTarget, setDeleteExamTarget] = useState<{ id: string; title: string } | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -100,6 +103,21 @@ export default function ExamsPage() {
     setCreateOpen(false);
     setTitle(''); setDescription(''); setCourseId('');
     router.push(`/exams/${newExam.id}`);
+  }
+
+  async function handleDeleteExam() {
+    if (!deleteExamTarget) return;
+    setDeleting(true);
+    const { error } = await deleteExamRecord(deleteExamTarget.id);
+    setDeleting(false);
+    if (error) {
+      toast({ title: 'Failed to delete exam', description: error.message, variant: 'destructive' });
+      return;
+    }
+    await logAudit('delete', 'exam', `Deleted exam: ${deleteExamTarget.title}`);
+    toast({ title: 'Exam deleted successfully' });
+    setDeleteExamTarget(null);
+    load();
   }
 
   if (loading) {
@@ -178,9 +196,20 @@ export default function ExamsPage() {
                         <Play className="h-4 w-4" /> Start Exam
                       </Button>
                     ) : (
-                      <Button size="sm" variant="outline" className="w-full gap-1 border-primary/30 text-primary hover:bg-primary/10" onClick={() => router.push(`/exams/${ex.id}`)}>
-                        <Settings className="h-4 w-4" /> Manage Exam Configuration
-                      </Button>
+                      <div className="flex gap-2">
+                        <Button size="sm" variant="outline" className="flex-1 gap-1 border-primary/30 text-primary hover:bg-primary/10" onClick={() => router.push(`/exams/${ex.id}`)}>
+                          <Settings className="h-4 w-4" /> Manage
+                        </Button>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-9 w-9 text-destructive hover:bg-destructive/10"
+                          title="Delete Exam"
+                          onClick={() => setDeleteExamTarget({ id: ex.id, title: ex.title })}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
                     )}
                   </div>
                 </CardContent>
@@ -254,6 +283,28 @@ export default function ExamsPage() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setCreateOpen(false)}>Cancel</Button>
             <Button onClick={createExam} disabled={creating}>{creating ? 'Creating...' : 'Create Exam'}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Exam Confirmation Dialog */}
+      <Dialog open={!!deleteExamTarget} onOpenChange={(open) => !open && setDeleteExamTarget(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-destructive/10 text-destructive mb-2">
+              <AlertTriangle className="h-6 w-6" />
+            </div>
+            <DialogTitle className="text-center">Delete Examination</DialogTitle>
+            <DialogDescription className="text-center text-xs">
+              Are you sure you want to delete <strong>"{deleteExamTarget?.title}"</strong>? This will remove the exam configuration and its question attachments.
+            </DialogDescription>
+          </DialogHeader>
+
+          <DialogFooter className="gap-2 sm:gap-0 mt-4">
+            <Button variant="outline" size="sm" onClick={() => setDeleteExamTarget(null)}>Cancel</Button>
+            <Button variant="destructive" size="sm" disabled={deleting} onClick={handleDeleteExam}>
+              {deleting ? 'Deleting...' : 'Yes, Delete Exam'}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

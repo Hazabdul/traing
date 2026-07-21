@@ -44,6 +44,7 @@ export default function TrainingLibraryPage() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [editOpen, setEditOpen] = useState(false);
+  const [plantOpen, setPlantOpen] = useState(false);
   const [editing, setEditing] = useState<Course | null>(null);
   const [creatingExamCourseId, setCreatingExamCourseId] = useState<string | null>(null);
   const { toast } = useToast();
@@ -137,7 +138,16 @@ export default function TrainingLibraryPage() {
       <PageHeader
         title="Training Library & Course Management"
         description={`${courses.length} courses available. Manage training materials and link exams.`}
-        actions={canEdit ? <Button onClick={() => { setEditing(null); setEditOpen(true); }} size="sm" className="gap-1"><Plus className="h-4 w-4" /> Add Course</Button> : undefined}
+        actions={canEdit ? (
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={() => setPlantOpen(true)} className="gap-1">
+              <Plus className="h-4 w-4" /> Add Plant
+            </Button>
+            <Button onClick={() => { setEditing(null); setEditOpen(true); }} size="sm" className="gap-1">
+              <Plus className="h-4 w-4" /> Add Course
+            </Button>
+          </div>
+        ) : undefined}
       />
 
       <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search courses by title or category…" className="max-w-md" />
@@ -232,6 +242,7 @@ export default function TrainingLibraryPage() {
       </div>
 
       <CourseFormDialog open={editOpen} onOpenChange={setEditOpen} course={editing} plants={plants} onSaved={load} />
+      <PlantFormDialog open={plantOpen} onOpenChange={setPlantOpen} onSaved={load} />
     </div>
   );
 }
@@ -404,6 +415,68 @@ function CourseFormDialog({ open, onOpenChange, course, plants, onSaved }: {
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
           <Button onClick={save} disabled={saving}>{saving ? 'Saving...' : 'Save Course'}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function PlantFormDialog({ open, onOpenChange, onSaved }: { open: boolean; onOpenChange: (o: boolean) => void; onSaved: () => void }) {
+  const { toast } = useToast();
+  const [saving, setSaving] = useState(false);
+  const [name, setName] = useState('');
+  const [code, setCode] = useState('');
+  const [description, setDescription] = useState('');
+
+  async function savePlant() {
+    if (!name.trim() || !code.trim()) {
+      toast({ title: 'Plant name and code are required', variant: 'destructive' });
+      return;
+    }
+    setSaving(true);
+    const { error } = await supabase.from('plants').insert({
+      name: name.trim(),
+      code: code.trim().toUpperCase(),
+      description: description.trim() || null,
+    });
+    setSaving(false);
+
+    if (error) {
+      toast({ title: 'Failed to create plant', description: error.message, variant: 'destructive' });
+      return;
+    }
+
+    await logAudit('create', 'plant', `Created industrial plant: ${name} (${code})`);
+    toast({ title: 'Industrial Plant added successfully!' });
+    setName(''); setCode(''); setDescription('');
+    onOpenChange(false);
+    onSaved();
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Add Industrial Plant</DialogTitle>
+          <DialogDescription>Define a new industrial plant requirement (e.g., SABIC Jubail, TASNEE Yanbu, ARAMCO).</DialogDescription>
+        </DialogHeader>
+        <div className="grid gap-3 py-2">
+          <div>
+            <Label className="text-xs font-bold">Plant Name *</Label>
+            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. SABIC Jubail Industrial Complex" />
+          </div>
+          <div>
+            <Label className="text-xs font-bold">Plant Code *</Label>
+            <Input value={code} onChange={(e) => setCode(e.target.value)} placeholder="e.g. SAB-JUB" />
+          </div>
+          <div>
+            <Label className="text-xs font-bold">Description / Scope</Label>
+            <Textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Site specific requirements, safety guidelines..." rows={2} />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button onClick={savePlant} disabled={saving}>{saving ? 'Adding...' : 'Add Plant'}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

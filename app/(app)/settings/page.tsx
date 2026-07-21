@@ -219,6 +219,9 @@ export default function SettingsPage() {
           <TabsTrigger value="settings" className="gap-1.5">
             <SettingsIcon className="h-4 w-4 text-primary" /> Configuration
           </TabsTrigger>
+          <TabsTrigger value="bands" className="gap-1.5">
+            <Award className="h-4 w-4 text-emerald-500" /> Rating Bands & Rules
+          </TabsTrigger>
           <TabsTrigger value="database" className="gap-1.5">
             <Database className="h-4 w-4 text-amber-500" /> Database Management
             {totalRecordCount > 0 && (
@@ -273,6 +276,83 @@ export default function SettingsPage() {
               </CardContent>
             </Card>
           </div>
+        </TabsContent>
+
+        {/* ── Tab 2: Rating Bands & Rules ──────────────────────────────── */}
+        <TabsContent value="bands">
+          <Card>
+            <CardHeader className="flex-row items-center justify-between space-y-0">
+              <div>
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Award className="h-4 w-4 text-emerald-500" /> Rating Bands & Classification Rules
+                </CardTitle>
+                <CardDescription>Configure driver performance bands, score thresholds, descriptions, and enforcement rules.</CardDescription>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4 pt-2">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                {/* D1 */}
+                <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-4 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <Badge className="bg-emerald-600 text-white font-bold">Band D1</Badge>
+                    <span className="text-xs font-bold text-emerald-700 dark:text-emerald-300">Score 90 – 100</span>
+                  </div>
+                  <h4 className="text-sm font-bold text-foreground">Top Performers</h4>
+                  <p className="text-xs text-muted-foreground">High safety compliance, zero major accidents or severe violations. Eligible for annual Safety Award bonus.</p>
+                  <div className="pt-2 text-[11px] text-emerald-700 dark:text-emerald-400 space-y-1 font-medium">
+                    <p>• Training: Quarterly safety refresher</p>
+                    <p>• Exams: Annual compliance evaluation</p>
+                    <p>• Award: Eligible for Safety Award &amp; Clean-Record Bonus (+5)</p>
+                  </div>
+                </div>
+
+                {/* D2 */}
+                <div className="rounded-xl border border-blue-500/30 bg-blue-500/5 p-4 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <Badge className="bg-blue-600 text-white font-bold">Band D2</Badge>
+                    <span className="text-xs font-bold text-blue-700 dark:text-blue-300">Score 76 – 89</span>
+                  </div>
+                  <h4 className="text-sm font-bold text-foreground">Good Performers</h4>
+                  <p className="text-xs text-muted-foreground">Consistently safe driving record with minor infractions. Standard training schedule applies.</p>
+                  <div className="pt-2 text-[11px] text-blue-700 dark:text-blue-400 space-y-1 font-medium">
+                    <p>• Training: Monthly scheduled training</p>
+                    <p>• Exams: Bi-monthly evaluation exams</p>
+                    <p>• Award: Standard evaluation tier</p>
+                  </div>
+                </div>
+
+                {/* D3 */}
+                <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <Badge className="bg-amber-600 text-white font-bold">Band D3</Badge>
+                    <span className="text-xs font-bold text-amber-700 dark:text-amber-300">Score 51 – 75</span>
+                  </div>
+                  <h4 className="text-sm font-bold text-foreground">Improvement Required</h4>
+                  <p className="text-xs text-muted-foreground">Driver requires mandatory corrective safety modules. Must show score improvement within 2 months.</p>
+                  <div className="pt-2 text-[11px] text-amber-700 dark:text-amber-400 space-y-1 font-medium">
+                    <p>• Training: System-selected corrective training</p>
+                    <p>• Exams: Mandatory bi-monthly re-evaluations</p>
+                    <p>• Enforcement: Warning notice issued if unimproved in 60 days</p>
+                  </div>
+                </div>
+
+                {/* D4 */}
+                <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-4 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <Badge className="bg-red-600 text-white font-bold">Band D4</Badge>
+                    <span className="text-xs font-bold text-red-700 dark:text-red-300">Score 0 – 50</span>
+                  </div>
+                  <h4 className="text-sm font-bold text-foreground">High Risk</h4>
+                  <p className="text-xs text-muted-foreground">Critical safety concern. Restricts transportation of hazardous goods until intensive retraining is passed.</p>
+                  <div className="pt-2 text-[11px] text-red-700 dark:text-red-400 space-y-1 font-medium">
+                    <p>• Training: Mandatory intensive safety training</p>
+                    <p>• Exams: High-frequency compliance re-testing</p>
+                    <p>• Enforcement: Barred from hazardous cargo transport</p>
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
         </TabsContent>
 
         {/* ── Tab 2: Database Table Management (Admin Only) ──────────── */}
