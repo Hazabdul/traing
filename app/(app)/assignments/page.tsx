@@ -30,7 +30,7 @@ import { formatDate, classNamesForDue } from '@/lib/format';
 import { exportToCSV } from '@/lib/export';
 import { useToast } from '@/hooks/use-toast';
 import { logAudit } from '@/lib/audit';
-import { createExamRecord } from '@/lib/exam-service';
+import { createExamRecord, fetchAllExams, updateExamRecord } from '@/lib/exam-service';
 
 interface AssignmentRow extends Training {
   driver_name?: string;
@@ -787,17 +787,30 @@ function ManualAssignDialog({ open, onOpenChange, drivers, courses, onSaved }: {
   const [courseId, setCourseId] = useState('');
   const [dueDate, setDueDate] = useState('');
 
-  // Exam option states
-  const [existingExam, setExistingExam] = useState<Exam | null>(null);
-  const [autoCreateExam, setAutoCreateExam] = useState(true);
+  // Exam list & selection states
+  const [allExams, setAllExams] = useState<(Exam & { course?: Course | null })[]>([]);
+  const [examMode, setExamMode] = useState<'existing' | 'create' | 'none'>('existing');
+  const [selectedExamId, setSelectedExamId] = useState<string>('');
+  const [examSearch, setExamSearch] = useState('');
   const [examTitle, setExamTitle] = useState('');
   const [passPercentage, setPassPercentage] = useState('70');
   const [timeLimit, setTimeLimit] = useState('30');
-  const [checkingExam, setCheckingExam] = useState(false);
+  const [loadingExams, setLoadingExams] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    async function loadExams() {
+      setLoadingExams(true);
+      const list = await fetchAllExams();
+      setAllExams(list);
+      setLoadingExams(false);
+    }
+    loadExams();
+  }, [open]);
 
   useEffect(() => {
     if (!courseId) {
-      setExistingExam(null);
+      setSelectedExamId('');
       setExamTitle('');
       return;
     }
@@ -808,23 +821,32 @@ function ManualAssignDialog({ open, onOpenChange, drivers, courses, onSaved }: {
       setPassPercentage(String(selectedCourse.pass_percentage ?? 70));
     }
 
-    async function checkExam() {
-      setCheckingExam(true);
-      const { data: ex } = await supabase.from('exams').select('*').eq('course_id', courseId).eq('is_active', true).maybeSingle();
-      setExistingExam((ex as Exam | null) ?? null);
-      setCheckingExam(false);
+    // Check if an exam already exists for this course in allExams
+    const matchingExam = allExams.find((e) => e.course_id === courseId);
+    if (matchingExam) {
+      setSelectedExamId(matchingExam.id);
+      setExamMode('existing');
+    } else {
+      setSelectedExamId('');
+      setExamMode('create');
     }
-    checkExam();
-  }, [courseId, courses]);
+  }, [courseId, courses, allExams]);
+
+  const filteredExamsList = useMemo(() => {
+    return allExams.filter((e) =>
+      e.title.toLowerCase().includes(examSearch.toLowerCase()) ||
+      (e.course?.title ?? '').toLowerCase().includes(examSearch.toLowerCase())
+    );
+  }, [allExams, examSearch]);
 
   async function save() {
     if (!driverId || !courseId) { toast({ title: 'Select driver and course', variant: 'destructive' }); return; }
     setSaving(true);
 
-    let finalExamId = existingExam?.id ?? null;
+    let finalExamId = selectedExamId || null;
 
-    // Create exam if option selected and no exam exists
-    if (!existingExam && autoCreateExam && examTitle.trim()) {
+    // Option 1: Create a brand new exam
+    if (examMode === 'create' && examTitle.trim()) {
       const { data: newExam, error: examErr } = await createExamRecord({
         title: examTitle.trim(),
         description: `Evaluation exam for course`,
@@ -835,10 +857,25 @@ function ManualAssignDialog({ open, onOpenChange, drivers, courses, onSaved }: {
         randomize_questions: true,
       });
 
-      if (examErr) {
-        console.warn('Exam creation notice:', examErr.message);
-      } else if (newExam) {
+      if (!examErr && newExam) {
         finalExamId = newExam.id;
+      }
+    }
+
+    // Option 2: Link an existing exam from /exams list to this course
+    if (examMode === 'existing' && selectedExamId) {
+      const chosenExam = allExams.find((e) => e.id === selectedExamId);
+      if (chosenExam && chosenExam.course_id !== courseId) {
+        await updateExamRecord({
+          id: chosenExam.id,
+          title: chosenExam.title,
+          description: chosenExam.description,
+          course_id: courseId,
+          pass_percentage: chosenExam.pass_percentage,
+          time_limit_minutes: chosenExam.time_limit_minutes ?? 30,
+          is_active: chosenExam.is_active ?? true,
+          randomize_questions: chosenExam.randomize_questions ?? true,
+        });
       }
     }
 
@@ -874,16 +911,16 @@ function ManualAssignDialog({ open, onOpenChange, drivers, courses, onSaved }: {
     });
 
     onOpenChange(false);
-    setDriverId(''); setCourseId(''); setDueDate(''); setExistingExam(null);
+    setDriverId(''); setCourseId(''); setDueDate(''); setSelectedExamId('');
     onSaved();
   }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Assign Training Course</DialogTitle>
-          <DialogDescription>Assign a course to a driver with evaluation exam options.</DialogDescription>
+          <DialogTitle>Assign Training & Exam</DialogTitle>
+          <DialogDescription>Assign a course to a driver with evaluation exam options from the Examinations list.</DialogDescription>
         </DialogHeader>
 
         <div className="grid gap-4 py-2">
@@ -903,73 +940,113 @@ function ManualAssignDialog({ open, onOpenChange, drivers, courses, onSaved }: {
             </Select>
           </div>
 
-          {/* Evaluation Exam Section */}
+          {/* Evaluation Exam Selector Box */}
           {courseId && (
-            <div className="rounded-xl border border-primary/20 bg-primary/5 p-3.5 space-y-3">
+            <div className="rounded-xl border border-primary/20 bg-primary/5 p-4 space-y-3">
               <div className="flex items-center justify-between">
                 <Label className="text-xs font-bold text-primary flex items-center gap-1.5">
-                  <Sparkles className="h-4 w-4 text-amber-500" /> Evaluation Exam Options
+                  <Sparkles className="h-4 w-4 text-amber-500" /> Evaluation Exam Selector
                 </Label>
-                {checkingExam && <span className="text-[10px] text-muted-foreground animate-pulse">Checking...</span>}
+                <div className="flex items-center gap-1 bg-background p-0.5 rounded-lg border text-[11px]">
+                  <button
+                    type="button"
+                    onClick={() => setExamMode('existing')}
+                    className={`px-2 py-1 rounded-md font-semibold transition-colors ${examMode === 'existing' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+                  >
+                    From /exams List
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setExamMode('create')}
+                    className={`px-2 py-1 rounded-md font-semibold transition-colors ${examMode === 'create' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+                  >
+                    Create New
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setExamMode('none')}
+                    className={`px-2 py-1 rounded-md font-semibold transition-colors ${examMode === 'none' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+                  >
+                    No Exam
+                  </button>
+                </div>
               </div>
 
-              {existingExam ? (
-                <div className="flex items-center gap-2 rounded-lg bg-card p-2.5 border text-xs">
-                  <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
-                  <div>
-                    <p className="font-bold text-foreground">{existingExam.title}</p>
-                    <p className="text-[10px] text-muted-foreground">Linked Exam · Pass: {existingExam.pass_percentage}% · Time: {existingExam.time_limit_minutes ?? 30}m</p>
-                  </div>
-                </div>
-              ) : (
-                <div className="space-y-3 pt-1">
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      id="autoExamToggle"
-                      checked={autoCreateExam}
-                      onChange={(e) => setAutoCreateExam(e.target.checked)}
-                      className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary accent-primary"
+              {/* Mode 1: Select from Existing Exams */}
+              {examMode === 'existing' && (
+                <div className="space-y-2 pt-1">
+                  <div className="flex gap-2">
+                    <Input
+                      placeholder="Search exam title or course..."
+                      value={examSearch}
+                      onChange={(e) => setExamSearch(e.target.value)}
+                      className="h-8 text-xs bg-card"
                     />
-                    <label htmlFor="autoExamToggle" className="text-xs font-semibold cursor-pointer">
-                      Auto-create evaluation exam for this course
-                    </label>
                   </div>
 
-                  {autoCreateExam && (
-                    <div className="space-y-2 pt-1 border-t border-primary/10">
+                  <Select value={selectedExamId} onValueChange={setSelectedExamId}>
+                    <SelectTrigger className="w-full h-9 text-xs bg-card">
+                      <SelectValue placeholder={loadingExams ? 'Loading exams...' : 'Choose an exam from /exams list'} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {filteredExamsList.map((ex) => (
+                        <SelectItem key={ex.id} value={ex.id} className="text-xs">
+                          <span className="font-semibold">{ex.title}</span> (Pass: {ex.pass_percentage}% · {ex.time_limit_minutes ?? 30}m)
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+
+                  {selectedExamId && (
+                    <div className="flex items-center gap-2 rounded-lg bg-card p-2.5 border text-xs text-emerald-700 dark:text-emerald-300">
+                      <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />
                       <div>
-                        <Label className="text-[11px] text-muted-foreground">Exam Title</Label>
-                        <Input
-                          value={examTitle}
-                          onChange={(e) => setExamTitle(e.target.value)}
-                          placeholder="Exam title..."
-                          className="mt-0.5 h-8 text-xs bg-card"
-                        />
-                      </div>
-                      <div className="grid grid-cols-2 gap-2">
-                        <div>
-                          <Label className="text-[11px] text-muted-foreground">Pass Mark (%)</Label>
-                          <Input
-                            type="number"
-                            value={passPercentage}
-                            onChange={(e) => setPassPercentage(e.target.value)}
-                            className="mt-0.5 h-8 text-xs bg-card"
-                          />
-                        </div>
-                        <div>
-                          <Label className="text-[11px] text-muted-foreground">Time Limit (mins)</Label>
-                          <Input
-                            type="number"
-                            value={timeLimit}
-                            onChange={(e) => setTimeLimit(e.target.value)}
-                            className="mt-0.5 h-8 text-xs bg-card"
-                          />
-                        </div>
+                        <p className="font-bold">Exam Linked to Assignment</p>
+                        <p className="text-[11px] opacity-80">This evaluation exam will be required for course completion.</p>
                       </div>
                     </div>
                   )}
                 </div>
+              )}
+
+              {/* Mode 2: Create Brand New Exam */}
+              {examMode === 'create' && (
+                <div className="space-y-2.5 pt-1">
+                  <div>
+                    <Label className="text-[11px] font-semibold text-muted-foreground">New Exam Title</Label>
+                    <Input
+                      value={examTitle}
+                      onChange={(e) => setExamTitle(e.target.value)}
+                      placeholder="e.g. Hazardous Driving Final Exam"
+                      className="mt-0.5 h-8 text-xs bg-card"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <Label className="text-[11px] font-semibold text-muted-foreground">Pass Percentage (%)</Label>
+                      <Input
+                        type="number"
+                        value={passPercentage}
+                        onChange={(e) => setPassPercentage(e.target.value)}
+                        className="mt-0.5 h-8 text-xs bg-card"
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-[11px] font-semibold text-muted-foreground">Time Limit (minutes)</Label>
+                      <Input
+                        type="number"
+                        value={timeLimit}
+                        onChange={(e) => setTimeLimit(e.target.value)}
+                        className="mt-0.5 h-8 text-xs bg-card"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Mode 3: No Exam */}
+              {examMode === 'none' && (
+                <p className="text-xs text-muted-foreground italic py-1">No evaluation exam will be linked to this course assignment.</p>
               )}
             </div>
           )}
