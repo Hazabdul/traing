@@ -10,6 +10,16 @@ export interface RatingInput {
   violation: ViolationCategory;
   warningCount: number;
   behaviour: BehaviourRating;
+
+  /**
+   * Optional ISO-8601 date strings for the driver's history events.
+   * Used by the clean-record bonus rule (see `computeCleanRecordBonus`).
+   * Each array holds the dates of that event type — newest first or any order.
+   */
+  accidentDates?: string[];    // e.g. dates of accident records
+  violationDates?: string[];   // e.g. dates of violation records
+  warningDates?: string[];     // e.g. dates of warning records
+  assessmentDates?: string[];  // e.g. dates of assessment records
 }
 
 export interface RatingResult {
@@ -17,6 +27,11 @@ export interface RatingResult {
   violationScore: number;
   warningScore: number;
   behaviourScore: number;
+  /**
+   * +5 clean-record bonus when no Accident / Violation / Warning / Assessment
+   * occurred in the last 2 full calendar months. 0 otherwise.
+   */
+  cleanRecordBonus: number;
   total: number;
   band: DriverRatingBand;
   riskLevel: string;
@@ -50,6 +65,91 @@ export function warningScoreFor(count: number): number {
   return 5;
 }
 
+// ---------------------------------------------------------------------------
+// Clean-Record Bonus Rule
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns the latest (most recent) JS Date found across all provided ISO-8601
+ * date-string arrays, or `null` if every array is empty / undefined.
+ */
+export function latestEventDate(
+  ...dateLists: (string[] | undefined)[]
+): Date | null {
+  let latest: Date | null = null;
+  for (const list of dateLists) {
+    if (!list) continue;
+    for (const raw of list) {
+      const d = new Date(raw);
+      if (!isNaN(d.getTime()) && (latest === null || d > latest)) {
+        latest = d;
+      }
+    }
+  }
+  return latest;
+}
+
+/**
+ * Determines whether a driver qualifies for the +5 clean-record bonus.
+ *
+ * Rules:
+ * - Examine all dates across Accident, Violation, Warning and Assessment.
+ * - Find the single most-recent date among them.
+ * - If that date is MORE than 2 full calendar months before `evaluationDate`
+ *   (or if the driver has NO records at all), the driver earns +5 points.
+ * - If any event falls within the last 2 months, no bonus is awarded.
+ *
+ * "2 full calendar months" means the year/month of the latest event must be
+ * at least 2 months prior to the year/month of `evaluationDate`.
+ *
+ * @param accidentDates   ISO-8601 date strings for accident records
+ * @param violationDates  ISO-8601 date strings for violation records
+ * @param warningDates    ISO-8601 date strings for warning records
+ * @param assessmentDates ISO-8601 date strings for assessment records
+ * @param evaluationDate  The reference "today" (defaults to actual today)
+ * @returns               5 if eligible, 0 if not
+ */
+export function computeCleanRecordBonus(
+  accidentDates: string[] | undefined,
+  violationDates: string[] | undefined,
+  warningDates: string[] | undefined,
+  assessmentDates: string[] | undefined,
+  evaluationDate: Date = new Date()
+): number {
+  const BONUS = 5;
+
+  const latest = latestEventDate(
+    accidentDates,
+    violationDates,
+    warningDates,
+    assessmentDates
+  );
+
+  // No records at all → driver is clean → award bonus
+  if (latest === null) return BONUS;
+
+  // Calculate the threshold: 2 full calendar months before evaluationDate.
+  // e.g. evaluationDate = 2026-07-21 → threshold month = 2026-05-21
+  const thresholdYear =
+    evaluationDate.getMonth() < 2
+      ? evaluationDate.getFullYear() - 1
+      : evaluationDate.getFullYear();
+  const thresholdMonth =
+    ((evaluationDate.getMonth() - 2 + 12) % 12);
+
+  // Compare year-month only (ignore day) to capture full calendar months
+  const latestYear = latest.getFullYear();
+  const latestMonth = latest.getMonth();
+
+  const isOlderThan2Months =
+    latestYear < thresholdYear ||
+    (latestYear === thresholdYear && latestMonth < thresholdMonth) ||
+    (latestYear === thresholdYear && latestMonth === thresholdMonth &&
+      latest.getDate() < evaluationDate.getDate());
+
+  return isOlderThan2Months ? BONUS : 0;
+}
+
 export function bandForScore(total: number): { band: DriverRatingBand; riskLevel: string } {
   if (total >= 90) return { band: 'D1', riskLevel: 'Low' };
   if (total >= 76) return { band: 'D2', riskLevel: 'Low-Medium' };
@@ -58,13 +158,34 @@ export function bandForScore(total: number): { band: DriverRatingBand; riskLevel
 }
 
 export function computeRating(input: RatingInput): RatingResult {
-  const accidentScore = ACCIDENT_SCORES[input.accident] ?? 20;
+  const accidentScore  = ACCIDENT_SCORES[input.accident]  ?? 20;
   const violationScore = VIOLATION_SCORES[input.violation] ?? 25;
-  const warningScore = warningScoreFor(input.warningCount);
+  const warningScore   = warningScoreFor(input.warningCount);
   const behaviourScore = BEHAVIOUR_SCORES[input.behaviour] ?? 10;
-  const total = accidentScore + violationScore + warningScore + behaviourScore;
+
+  // ── Clean-Record Bonus (+5) ──────────────────────────────────────────────
+  // Awarded once per evaluation when no Accident / Violation / Warning /
+  // Assessment has occurred within the last 2 full calendar months.
+  const cleanRecordBonus = computeCleanRecordBonus(
+    input.accidentDates,
+    input.violationDates,
+    input.warningDates,
+    input.assessmentDates,
+  );
+
+  const total = accidentScore + violationScore + warningScore + behaviourScore + cleanRecordBonus;
   const { band, riskLevel } = bandForScore(total);
-  return { accidentScore, violationScore, warningScore, behaviourScore, total, band, riskLevel };
+
+  return {
+    accidentScore,
+    violationScore,
+    warningScore,
+    behaviourScore,
+    cleanRecordBonus,
+    total,
+    band,
+    riskLevel,
+  };
 }
 
 export interface TrainingRule {
