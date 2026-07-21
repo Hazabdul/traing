@@ -44,6 +44,13 @@ const DICT: Record<LangKey, {
   selectDriver: string;
   driverLabel: string;
   startBtn: string;
+  driver: string;
+  duration: string;
+  minutes: string;
+  passThreshold: string;
+  noQuestions: string;
+  singleChoice: string;
+  multiChoice: string;
 }> = {
   en: {
     name: 'English', flag: '🇬🇧', dir: 'ltr',
@@ -55,7 +62,10 @@ const DICT: Record<LangKey, {
     retry: 'Retry Exam', score: 'Score', correct: 'Correct',
     finalizing: 'Submitting will finalize your attempt.',
     selectDriver: 'Identify Yourself to Start', driverLabel: 'Select Your Name / Employee ID',
-    startBtn: 'Start Examination',
+    startBtn: 'Start Examination', driver: 'Driver', duration: 'Duration',
+    minutes: 'Minutes', passThreshold: 'Pass Threshold',
+    noQuestions: 'This exam has no questions available.',
+    singleChoice: 'Single Choice', multiChoice: 'Multiple Choice',
   },
   hi: {
     name: 'हिंदी (Hindi)', flag: '🇮🇳', dir: 'ltr',
@@ -67,7 +77,10 @@ const DICT: Record<LangKey, {
     retry: 'पुनः परीक्षा दें', score: 'अंक', correct: 'सही',
     finalizing: 'जमा करने से आपका प्रयास अंतिम रूप से दर्ज हो जाएगा।',
     selectDriver: 'शुरू करने के लिए अपनी पहचान चुनें', driverLabel: 'अपना नाम / कर्मचारी आईडी चुनें',
-    startBtn: 'परीक्षा शुरू करें',
+    startBtn: 'परीक्षा शुरू करें', driver: 'चालक', duration: 'अवधि',
+    minutes: 'मिनट', passThreshold: 'उत्तीर्ण सीमा',
+    noQuestions: 'इस परीक्षा में कोई प्रश्न उपलब्ध नहीं हैं।',
+    singleChoice: 'एकल विकल्प', multiChoice: 'बहु विकल्प',
   },
   ur: {
     name: 'اردو (Urdu)', flag: '🇵🇰', dir: 'rtl',
@@ -79,7 +92,10 @@ const DICT: Record<LangKey, {
     retry: 'دوبارہ امتحان دیں', score: 'اسکور', correct: 'درست',
     finalizing: 'جمع کرنے سے آپ کی کوشش حتمی ہو جائے گی۔',
     selectDriver: 'شروع کرنے کے لیے اپنی شناخت منتخب کریں', driverLabel: 'اپنا نام / ملازم آئی ڈی منتخب کریں',
-    startBtn: 'امتحان شروع کریں',
+    startBtn: 'امتحان شروع کریں', driver: 'ڈرائیور', duration: 'دورانیہ',
+    minutes: 'منٹ', passThreshold: 'پاسنگ کی حد',
+    noQuestions: 'اس امتحان میں کوئی سوال دستیاب نہیں ہے۔',
+    singleChoice: 'واحد انتخاب', multiChoice: 'متعدد التخواب',
   },
   ar: {
     name: 'العربية (Arabic)', flag: '🇸🇦', dir: 'rtl',
@@ -91,7 +107,10 @@ const DICT: Record<LangKey, {
     retry: 'إعادة الاختبار', score: 'الدرجة', correct: 'الإجابات الصحيحة',
     finalizing: 'سيؤدي الإرسال إلى إنهاء محاولتك.',
     selectDriver: 'حدد هويتك للبدء', driverLabel: 'اختر اسمك / الرقم الوظيفي',
-    startBtn: 'بدء الاختبار',
+    startBtn: 'بدء الاختبار', driver: 'السائق', duration: 'المدة',
+    minutes: 'دقائق', passThreshold: 'نسبة النجاح المطلوبة',
+    noQuestions: 'لا توجد أسئلة متاحة في هذا الاختبار.',
+    singleChoice: 'خيار واحد', multiChoice: 'خيارات متعددة',
   },
   tl: {
     name: 'Tagalog (Filipino)', flag: '🇵🇭', dir: 'ltr',
@@ -103,7 +122,10 @@ const DICT: Record<LangKey, {
     retry: 'Subukang Muli', score: 'Marka', correct: 'Tumpak',
     finalizing: 'Ang pagsumite ay magtatapos sa iyong pagsubok.',
     selectDriver: 'Kilalanin ang Sarili Bago Magsimula', driverLabel: 'Piliin ang Pangalan / Employee ID',
-    startBtn: 'Simulan ang Pagsusulit',
+    startBtn: 'Simulan ang Pagsusulit', driver: 'Tsuper', duration: 'Tagal',
+    minutes: 'Minuto', passThreshold: 'Pasa na Antas',
+    noQuestions: 'Walang available na mga tanong sa pagsusulit na ito.',
+    singleChoice: 'Isang Pagpipilian', multiChoice: 'Maraming Pagpipilian',
   },
 };
 
@@ -385,11 +407,11 @@ function PublicTakeExamContent() {
             <CardContent className="space-y-5 pt-2">
               <div className="rounded-xl bg-muted/40 p-4 space-y-2 border text-xs">
                 <div className="flex justify-between">
-                  <span className="text-muted-foreground">Duration:</span>
-                  <span className="font-bold">{examData.exam.time_limit_minutes ?? 30} Minutes</span>
+                  <span className="text-muted-foreground">{t.duration}:</span>
+                  <span className="font-bold">{examData.exam.time_limit_minutes ?? 30} {t.minutes}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-muted-foreground">Pass Threshold:</span>
+                  <span className="text-muted-foreground">{t.passThreshold}:</span>
                   <span className="font-bold">{examData.exam.pass_percentage}%</span>
                 </div>
               </div>
@@ -428,7 +450,7 @@ function PublicTakeExamContent() {
               <CardHeader className="flex-row items-center justify-between space-y-0">
                 <div>
                   <CardTitle className="text-lg">{examData.exam.title}</CardTitle>
-                  <CardDescription>Driver: {selectedDriver?.full_name} ({selectedDriver?.employee_id})</CardDescription>
+                  <CardDescription>{t.driver}: {selectedDriver?.full_name} ({selectedDriver?.employee_id})</CardDescription>
                 </div>
 
                 <div className={`flex items-center gap-2 rounded-xl px-4 py-2 font-mono text-base font-black border transition-colors ${
@@ -450,7 +472,7 @@ function PublicTakeExamContent() {
                 </div>
 
                 {examData.questions.length === 0 ? (
-                  <p className="py-12 text-center text-sm text-muted-foreground">This exam has no questions available.</p>
+                  <p className="py-12 text-center text-sm text-muted-foreground">{t.noQuestions}</p>
                 ) : (
                   <div className="space-y-6">
                     {examData.questions.map((q, idx) => {
@@ -461,7 +483,7 @@ function PublicTakeExamContent() {
                             <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-bold text-primary">{idx + 1}</span>
                             <div>
                               <p className="text-sm font-semibold">{q.question_text}</p>
-                              <p className="mt-0.5 text-[10px] text-muted-foreground uppercase">{q.question_type.replace('_', ' ')}</p>
+                              <p className="mt-0.5 text-[10px] text-muted-foreground uppercase font-bold tracking-wider">{isMulti ? t.multiChoice : t.singleChoice}</p>
                             </div>
                           </div>
 

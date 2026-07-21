@@ -51,6 +51,9 @@ const DICT: Record<LangKey, {
   share: string;
   copyLink: string;
   whatsApp: string;
+  noQuestions: string;
+  singleChoice: string;
+  multiChoice: string;
 }> = {
   en: {
     name: 'English', flag: '🇬🇧', dir: 'ltr',
@@ -62,6 +65,8 @@ const DICT: Record<LangKey, {
     retry: 'Retry Exam', backToExams: 'Back to Exams', viewCert: 'View Certificate',
     score: 'Score', correct: 'Correct', finalizing: 'Submitting will finalize your attempt.',
     share: 'Share Exam', copyLink: 'Copy Link', whatsApp: 'WhatsApp',
+    noQuestions: 'This exam has no questions available.',
+    singleChoice: 'Single Choice', multiChoice: 'Multiple Choice',
   },
   hi: {
     name: 'हिंदी (Hindi)', flag: '🇮🇳', dir: 'ltr',
@@ -73,6 +78,8 @@ const DICT: Record<LangKey, {
     retry: 'पुनः परीक्षा दें', backToExams: 'परीक्षाओं पर वापस जाएँ', viewCert: 'प्रमाणपत्र देखें',
     score: 'अंक', correct: 'सही', finalizing: 'जमा करने से आपका प्रयास अंतिम रूप से दर्ज हो जाएगा।',
     share: 'परीक्षा शेयर करें', copyLink: 'लिंक कॉपी करें', whatsApp: 'व्हाट्सएप',
+    noQuestions: 'इस परीक्षा में कोई प्रश्न उपलब्ध नहीं हैं।',
+    singleChoice: 'एकल विकल्प', multiChoice: 'बहु विकल्प',
   },
   ur: {
     name: 'اردو (Urdu)', flag: '🇵🇰', dir: 'rtl',
@@ -84,6 +91,8 @@ const DICT: Record<LangKey, {
     retry: 'دوبارہ امتحان دیں', backToExams: 'امتحانات پر واپس جائیں', viewCert: 'سرٹیفکیٹ دیکھیں',
     score: 'اسکور', correct: 'درست', finalizing: 'جمع کرنے سے آپ کی کوشش حتمی ہو جائے گی۔',
     share: 'امتحان شیئر کریں', copyLink: 'لنک کاپی کریں', whatsApp: 'واٹس ایپ',
+    noQuestions: 'اس امتحان میں کوئی سوال دستیاب نہیں ہے۔',
+    singleChoice: 'واحد انتخاب', multiChoice: 'متعدد التخواب',
   },
   ar: {
     name: 'العربية (Arabic)', flag: '🇸🇦', dir: 'rtl',
@@ -95,6 +104,8 @@ const DICT: Record<LangKey, {
     retry: 'إعادة الاختبار', backToExams: 'العودة للاختبارات', viewCert: 'عرض الشهادة',
     score: 'الدرجة', correct: 'الإجابات الصحيحة', finalizing: 'سيؤدي الإرسال إلى إنهاء محاولتك.',
     share: 'مشاركة الاختبار', copyLink: 'نسخ الرابط', whatsApp: 'واتساب',
+    noQuestions: 'لا توجد أسئلة متاحة في هذا الاختبار.',
+    singleChoice: 'خيار واحد', multiChoice: 'خيارات متعددة',
   },
   tl: {
     name: 'Tagalog (Filipino)', flag: '🇵🇭', dir: 'ltr',
@@ -106,6 +117,8 @@ const DICT: Record<LangKey, {
     retry: 'Subukang Muli', backToExams: 'Bumalik sa Pagsusulit', viewCert: 'Tingnan ang Sertipiko',
     score: 'Marka', correct: 'Tumpak', finalizing: 'Ang pagsumite ay magtatapos sa iyong pagsubok.',
     share: 'Ibahagi ang Pagsusulit', copyLink: 'Kopyahin ang Link', whatsApp: 'WhatsApp',
+    noQuestions: 'Walang available na mga tanong sa pagsusulit na ito.',
+    singleChoice: 'Isang Pagpipilian', multiChoice: 'Maraming Pagpipilian',
   },
 };
 
@@ -361,7 +374,7 @@ export default function TakeExamPage() {
           </div>
 
           {exam.questions.length === 0 ? (
-            <p className="py-12 text-center text-sm text-muted-foreground">This exam has no questions yet.</p>
+            <p className="py-12 text-center text-sm text-muted-foreground">{t.noQuestions}</p>
           ) : (
             <div className="space-y-6">
               {exam.questions.map((q, idx) => {
@@ -372,7 +385,7 @@ export default function TakeExamPage() {
                       <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-bold text-primary">{idx + 1}</span>
                       <div>
                         <p className="text-sm font-medium">{q.question_text}</p>
-                        <p className="mt-0.5 text-[10px] text-muted-foreground uppercase">{q.question_type.replace('_', ' ')}</p>
+                        <p className="mt-0.5 text-[10px] text-muted-foreground uppercase font-bold tracking-wider">{isMulti ? t.multiChoice : t.singleChoice}</p>
                       </div>
                     </div>
 
