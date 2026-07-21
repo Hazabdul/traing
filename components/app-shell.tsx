@@ -10,7 +10,7 @@ import { Loader2 } from 'lucide-react';
 export function AppShell({ children }: { children: React.ReactNode }) {
   const { user, profile, loading } = useAuth();
   const router = useRouter();
-  const [menuOpen, setMenuOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(true);
 
   useEffect(() => {
     if (!loading && !user) {
@@ -43,8 +43,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex min-h-screen bg-background">
       <Sidebar open={menuOpen} onClose={() => setMenuOpen(false)} />
-      <div className="flex min-w-0 flex-1 flex-col">
-        <Topbar onMenuClick={() => setMenuOpen(true)} />
+      <div className="flex min-w-0 flex-1 flex-col transition-all duration-300">
+        <Topbar onMenuClick={() => setMenuOpen((prev) => !prev)} isSidebarOpen={menuOpen} />
         <main className="scrollbar-thin flex-1 overflow-x-hidden p-4 lg:p-6">
           <div className="mx-auto max-w-7xl animate-fade-in">{children}</div>
         </main>

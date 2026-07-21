@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useTheme } from 'next-themes';
-import { Menu, Moon, Sun, LogOut, ChevronDown, Bell, UserCircle } from 'lucide-react';
+import { PanelLeft, PanelLeftClose, Moon, Sun, LogOut, ChevronDown, Bell, UserCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAuth, ROLE_LABELS } from '@/lib/auth-context';
 import {
@@ -18,7 +18,7 @@ import { Badge } from '@/components/ui/badge';
 import { supabase } from '@/lib/supabase-client';
 import { useRouter } from 'next/navigation';
 
-export function Topbar({ onMenuClick }: { onMenuClick: () => void }) {
+export function Topbar({ onMenuClick, isSidebarOpen }: { onMenuClick: () => void; isSidebarOpen?: boolean }) {
   const { profile, signOut } = useAuth();
   const { theme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
@@ -57,14 +57,16 @@ export function Topbar({ onMenuClick }: { onMenuClick: () => void }) {
 
   return (
     <header className="sticky top-0 z-20 flex h-16 items-center gap-3 border-b bg-card/95 px-4 backdrop-blur lg:px-6">
+      {/* Sidebar Toggle Button for both Desktop & Mobile */}
       <Button
         variant="ghost"
         size="icon"
-        className="lg:hidden"
         onClick={onMenuClick}
-        aria-label="Open menu"
+        title={isSidebarOpen ? "Collapse Sidebar" : "Expand Sidebar"}
+        aria-label="Toggle Sidebar"
+        className="hover:bg-muted text-muted-foreground hover:text-foreground"
       >
-        <Menu className="h-5 w-5" />
+        {isSidebarOpen ? <PanelLeftClose className="h-5 w-5" /> : <PanelLeft className="h-5 w-5" />}
       </Button>
 
       <div className="hidden flex-col sm:flex">
