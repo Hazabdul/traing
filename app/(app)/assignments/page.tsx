@@ -22,7 +22,8 @@ import { Label } from '@/components/ui/label';
 import {
   Plus, Zap, Download, Edit2, Trash2, CheckCircle2, Clock, AlertTriangle, XCircle,
   GraduationCap, Bell, RefreshCw, ClipboardCheck, Play, Sparkles, User, BookOpen,
-  FileText, Video, Presentation, Headphones, Image as ImageIcon, Award, ExternalLink, Calendar, ShieldCheck
+  FileText, Video, Presentation, Headphones, Image as ImageIcon, Award, ExternalLink, Calendar, ShieldCheck,
+  Copy, MessageCircle
 } from 'lucide-react';
 import type { ColumnDef } from '@tanstack/react-table';
 import { TRAINING_STATUS_LABELS, TRAINING_STATUS_COLORS, RATING_BAND_COLORS, MATERIAL_TYPE_LABELS } from '@/lib/constants';
@@ -383,23 +384,51 @@ export default function AdvancedAssignmentsPage() {
         const isDone = row.original.status === 'completed';
         if (row.original.exam_id) {
           return (
-            <div className="flex flex-col gap-1 items-start">
-              <Button
-                size="sm"
-                variant={isDone || attempts > 0 ? "outline" : "default"}
-                className={`h-8 text-xs gap-1 ${isDone || attempts > 0 ? 'border-primary/40 text-primary hover:bg-primary/10' : 'shadow-xs'}`}
-                onClick={() => router.push(`/exams/${row.original.exam_id}/take`)}
-              >
-                {attempts > 0 || isDone ? (
-                  <>
-                    <RefreshCw className="h-3.5 w-3.5 text-primary" /> Retake Exam
-                  </>
-                ) : (
-                  <>
-                    <Play className="h-3.5 w-3.5" /> Start Exam
-                  </>
-                )}
-              </Button>
+            <div className="flex flex-col gap-1.5 items-start">
+              <div className="flex items-center gap-1">
+                <Button
+                  size="sm"
+                  variant={isDone || attempts > 0 ? "outline" : "default"}
+                  className={`h-8 text-xs gap-1 ${isDone || attempts > 0 ? 'border-primary/40 text-primary hover:bg-primary/10' : 'shadow-xs'}`}
+                  onClick={() => router.push(`/exams/${row.original.exam_id}/take`)}
+                >
+                  {attempts > 0 || isDone ? (
+                    <>
+                      <RefreshCw className="h-3.5 w-3.5 text-primary" /> Retake Exam
+                    </>
+                  ) : (
+                    <>
+                      <Play className="h-3.5 w-3.5" /> Start Exam
+                    </>
+                  )}
+                </Button>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                  title="Copy Exam Share Link"
+                  onClick={() => {
+                    const url = `${window.location.origin}/exams/${row.original.exam_id}/take`;
+                    navigator.clipboard.writeText(url);
+                    toast({ title: 'Shareable link copied!', description: 'Exam URL copied to clipboard.' });
+                  }}
+                >
+                  <Copy className="h-3.5 w-3.5" />
+                </Button>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="h-8 w-8 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/40"
+                  title="Share to WhatsApp"
+                  onClick={() => {
+                    const url = `${window.location.origin}/exams/${row.original.exam_id}/take`;
+                    const msg = `📋 SafeFleet Evaluation Exam: ${row.original.exam_title ?? 'Course Exam'}\n\nPlease click the link to start your exam:\n${url}`;
+                    window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(msg)}`, '_blank');
+                  }}
+                >
+                  <MessageCircle className="h-3.5 w-3.5" />
+                </Button>
+              </div>
               {attempts > 0 ? (
                 <span className="text-[10px] font-semibold text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
                   Attended: {attempts} time{attempts > 1 ? 's' : ''}
