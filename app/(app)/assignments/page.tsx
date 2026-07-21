@@ -783,9 +783,12 @@ function ManualAssignDialog({ open, onOpenChange, drivers, courses, onSaved }: {
 }) {
   const { toast } = useToast();
   const [saving, setSaving] = useState(false);
-  const [driverId, setDriverId] = useState('');
   const [courseId, setCourseId] = useState('');
   const [dueDate, setDueDate] = useState('');
+
+  // Driver selection states
+  const [driverSearch, setDriverSearch] = useState('');
+  const [selectedDriverIds, setSelectedDriverIds] = useState<string[]>([]);
 
   // Exam list & selection states
   const [allExams, setAllExams] = useState<(Exam & { course?: Course | null })[]>([]);
@@ -821,7 +824,6 @@ function ManualAssignDialog({ open, onOpenChange, drivers, courses, onSaved }: {
       setPassPercentage(String(selectedCourse.pass_percentage ?? 70));
     }
 
-    // Check if an exam already exists for this course in allExams
     const matchingExam = allExams.find((e) => e.course_id === courseId);
     if (matchingExam) {
       setSelectedExamId(matchingExam.id);
@@ -832,6 +834,15 @@ function ManualAssignDialog({ open, onOpenChange, drivers, courses, onSaved }: {
     }
   }, [courseId, courses, allExams]);
 
+  // Filtered drivers list based on search query
+  const filteredDrivers = useMemo(() => {
+    return drivers.filter((d) =>
+      d.full_name.toLowerCase().includes(driverSearch.toLowerCase()) ||
+      d.employee_id.toLowerCase().includes(driverSearch.toLowerCase()) ||
+      (d.last_rating_band ?? '').toLowerCase().includes(driverSearch.toLowerCase())
+    );
+  }, [drivers, driverSearch]);
+
   const filteredExamsList = useMemo(() => {
     return allExams.filter((e) =>
       e.title.toLowerCase().includes(examSearch.toLowerCase()) ||
@@ -839,8 +850,26 @@ function ManualAssignDialog({ open, onOpenChange, drivers, courses, onSaved }: {
     );
   }, [allExams, examSearch]);
 
+  function toggleDriver(id: string) {
+    setSelectedDriverIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+  }
+
+  function selectAllDrivers() {
+    const allIds = filteredDrivers.map((d) => d.id);
+    setSelectedDriverIds(allIds);
+  }
+
+  function clearDriverSelection() {
+    setSelectedDriverIds([]);
+  }
+
   async function save() {
-    if (!driverId || !courseId) { toast({ title: 'Select driver and course', variant: 'destructive' }); return; }
+    if (selectedDriverIds.length === 0 || !courseId) {
+      toast({ title: 'Select at least one driver and a course', variant: 'destructive' });
+      return;
+    }
     setSaving(true);
 
     let finalExamId = selectedExamId || null;
@@ -879,39 +908,46 @@ function ManualAssignDialog({ open, onOpenChange, drivers, courses, onSaved }: {
       }
     }
 
-    const { error } = await supabase.from('trainings').insert({
-      driver_id: driverId,
+    // Batch insert assignments for all selected drivers
+    const rowsToInsert = selectedDriverIds.map((id) => ({
+      driver_id: id,
       course_id: courseId,
-      status: 'assigned',
+      status: 'assigned' as const,
       due_date: dueDate || null,
       source: 'manual',
-    });
+    }));
+
+    const { error } = await supabase.from('trainings').insert(rowsToInsert);
 
     setSaving(false);
     if (error) { toast({ title: 'Failed to assign course', description: error.message, variant: 'destructive' }); return; }
 
-    const drv = drivers.find((d) => d.id === driverId);
     const crs = courses.find((c) => c.id === courseId);
-    await logAudit('assign', 'training', `Assigned ${crs?.title} to ${drv?.full_name}`, {}, driverId);
 
-    const { data: prof } = await supabase.from('profiles').select('user_id').eq('driver_id', driverId).maybeSingle();
-    if (prof?.user_id) {
-      await supabase.from('notifications').insert({
-        user_id: prof.user_id,
-        driver_id: driverId,
-        channel: 'in_app',
-        title: 'Training & Exam Assigned',
-        body: `${crs?.title} and evaluation exam have been assigned to you.`,
-      });
+    // Audit logs & notifications for each selected driver
+    for (const dId of selectedDriverIds) {
+      const drv = drivers.find((d) => d.id === dId);
+      await logAudit('assign', 'training', `Assigned ${crs?.title} to ${drv?.full_name}`, {}, dId);
+
+      const { data: prof } = await supabase.from('profiles').select('user_id').eq('driver_id', dId).maybeSingle();
+      if (prof?.user_id) {
+        await supabase.from('notifications').insert({
+          user_id: prof.user_id,
+          driver_id: dId,
+          channel: 'in_app',
+          title: 'Training & Exam Assigned',
+          body: `${crs?.title} and evaluation exam have been assigned to you.`,
+        });
+      }
     }
 
     toast({
       title: 'Training Assigned',
-      description: finalExamId ? 'Course and Evaluation Exam linked successfully.' : 'Course assigned to driver.',
+      description: `Assigned ${crs?.title} to ${selectedDriverIds.length} driver(s) successfully!`,
     });
 
     onOpenChange(false);
-    setDriverId(''); setCourseId(''); setDueDate(''); setSelectedExamId('');
+    setSelectedDriverIds([]); setCourseId(''); setDueDate(''); setSelectedExamId(''); setDriverSearch('');
     onSaved();
   }
 
@@ -920,22 +956,81 @@ function ManualAssignDialog({ open, onOpenChange, drivers, courses, onSaved }: {
       <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Assign Training & Exam</DialogTitle>
-          <DialogDescription>Assign a course to a driver with evaluation exam options from the Examinations list.</DialogDescription>
+          <DialogDescription>Assign a course to single or multiple drivers with evaluation exam options.</DialogDescription>
         </DialogHeader>
 
         <div className="grid gap-4 py-2">
-          <div>
-            <Label className="text-xs font-semibold">Select Driver</Label>
-            <Select value={driverId} onValueChange={setDriverId}>
-              <SelectTrigger className="mt-1"><SelectValue placeholder="Select driver" /></SelectTrigger>
-              <SelectContent>{drivers.map((d) => <SelectItem key={d.id} value={d.id}>{d.full_name} ({d.employee_id})</SelectItem>)}</SelectContent>
-            </Select>
+          {/* Driver Multi-Select Component */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <Label className="text-xs font-semibold">
+                Select Drivers ({selectedDriverIds.length} of {drivers.length} selected)
+              </Label>
+              <div className="flex gap-2">
+                <Button variant="ghost" size="sm" onClick={selectAllDrivers} className="h-6 text-[11px] px-2 text-primary">
+                  Select All ({filteredDrivers.length})
+                </Button>
+                {selectedDriverIds.length > 0 && (
+                  <Button variant="ghost" size="sm" onClick={clearDriverSelection} className="h-6 text-[11px] px-2 text-muted-foreground">
+                    Clear
+                  </Button>
+                )}
+              </div>
+            </div>
+
+            <Input
+              placeholder="Search driver by name, ID (e.g. EMP-1001), or band..."
+              value={driverSearch}
+              onChange={(e) => setDriverSearch(e.target.value)}
+              className="h-8 text-xs"
+            />
+
+            <div className="max-h-40 overflow-y-auto rounded-lg border bg-card p-2 space-y-1">
+              {filteredDrivers.length === 0 ? (
+                <p className="text-xs text-muted-foreground py-3 text-center">No drivers matching search.</p>
+              ) : (
+                filteredDrivers.map((d) => {
+                  const isChecked = selectedDriverIds.includes(d.id);
+                  return (
+                    <div
+                      key={d.id}
+                      onClick={() => toggleDriver(d.id)}
+                      className={`flex items-center justify-between p-2 rounded-md border text-xs cursor-pointer transition-colors ${
+                        isChecked ? 'bg-primary/10 border-primary/40 font-semibold' : 'hover:bg-muted'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 min-w-0 truncate">
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={() => {}}
+                          className="h-4 w-4 rounded border-gray-300 text-primary accent-primary"
+                        />
+                        <span className="truncate">{d.full_name}</span>
+                        <span className="text-[11px] text-muted-foreground">({d.employee_id})</span>
+                      </div>
+                      {d.last_rating_band && (
+                        <span
+                          className="text-[10px] font-bold px-1.5 py-0.5 rounded"
+                          style={{
+                            backgroundColor: `${RATING_BAND_COLORS[d.last_rating_band as DriverRatingBand]}20`,
+                            color: RATING_BAND_COLORS[d.last_rating_band as DriverRatingBand],
+                          }}
+                        >
+                          {d.last_rating_band}
+                        </span>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
           </div>
 
           <div>
             <Label className="text-xs font-semibold">Select Course</Label>
             <Select value={courseId} onValueChange={setCourseId}>
-              <SelectTrigger className="mt-1"><SelectValue placeholder="Select course" /></SelectTrigger>
+              <SelectTrigger className="mt-1"><SelectValue placeholder="Select course to assign" /></SelectTrigger>
               <SelectContent>{courses.map((c) => <SelectItem key={c.id} value={c.id}>{c.title}</SelectItem>)}</SelectContent>
             </Select>
           </div>
@@ -975,14 +1070,12 @@ function ManualAssignDialog({ open, onOpenChange, drivers, courses, onSaved }: {
               {/* Mode 1: Select from Existing Exams */}
               {examMode === 'existing' && (
                 <div className="space-y-2 pt-1">
-                  <div className="flex gap-2">
-                    <Input
-                      placeholder="Search exam title or course..."
-                      value={examSearch}
-                      onChange={(e) => setExamSearch(e.target.value)}
-                      className="h-8 text-xs bg-card"
-                    />
-                  </div>
+                  <Input
+                    placeholder="Search exam title or course..."
+                    value={examSearch}
+                    onChange={(e) => setExamSearch(e.target.value)}
+                    className="h-8 text-xs bg-card"
+                  />
 
                   <Select value={selectedExamId} onValueChange={setSelectedExamId}>
                     <SelectTrigger className="w-full h-9 text-xs bg-card">
@@ -1001,7 +1094,7 @@ function ManualAssignDialog({ open, onOpenChange, drivers, courses, onSaved }: {
                     <div className="flex items-center gap-2 rounded-lg bg-card p-2.5 border text-xs text-emerald-700 dark:text-emerald-300">
                       <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />
                       <div>
-                        <p className="font-bold">Exam Linked to Assignment</p>
+                        <p className="font-bold">Exam Linked to Assignments</p>
                         <p className="text-[11px] opacity-80">This evaluation exam will be required for course completion.</p>
                       </div>
                     </div>
@@ -1059,8 +1152,12 @@ function ManualAssignDialog({ open, onOpenChange, drivers, courses, onSaved }: {
 
         <DialogFooter className="pt-2">
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button onClick={save} disabled={saving}>
-            {saving ? 'Assigning...' : 'Assign Course & Exam'}
+          <Button onClick={save} disabled={saving || selectedDriverIds.length === 0 || !courseId}>
+            {saving
+              ? 'Assigning...'
+              : selectedDriverIds.length > 1
+              ? `Assign to ${selectedDriverIds.length} Drivers`
+              : 'Assign Course & Exam'}
           </Button>
         </DialogFooter>
       </DialogContent>
