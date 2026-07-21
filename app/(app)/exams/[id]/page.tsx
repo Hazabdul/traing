@@ -214,16 +214,6 @@ export default function ManageExamPage() {
       <PageHeader
         title={`Manage Exam: ${exam.title}`}
         description="Configure exam settings, pass thresholds, share links, and attach questions."
-        actions={
-          <div className="flex flex-wrap gap-2">
-            <Button variant="outline" size="sm" onClick={copyShareableLink} className="gap-1.5">
-              <Copy className="h-4 w-4" /> Copy Share Link
-            </Button>
-            <Button variant="default" size="sm" onClick={shareOnWhatsApp} className="gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs">
-              <MessageCircle className="h-4 w-4" /> Share to WhatsApp
-            </Button>
-          </div>
-        }
       />
 
       <div className="grid gap-6 md:grid-cols-3">
