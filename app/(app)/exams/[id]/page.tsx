@@ -22,6 +22,7 @@ import { ArrowLeft, Plus, Trash2, HelpCircle, Save, CheckCircle2, Clock } from '
 import { QUESTION_TYPE_LABELS, DIFFICULTY_LABELS } from '@/lib/constants';
 import { useToast } from '@/hooks/use-toast';
 import { logAudit } from '@/lib/audit';
+import { updateExamRecord, addQuestionToExamRecord, removeQuestionFromExamRecord } from '@/lib/exam-service';
 
 export default function ManageExamPage() {
   const router = useRouter();
@@ -117,18 +118,16 @@ export default function ManageExamPage() {
     }
 
     setSaving(true);
-    const { error } = await supabase
-      .from('exams')
-      .update({
-        title,
-        description: description || null,
-        course_id: courseId || null,
-        pass_percentage: Number(passPercentage) || 70,
-        time_limit_minutes: Number(timeLimit) || 30,
-        is_active: isActive,
-        randomize_questions: randomize,
-      })
-      .eq('id', exam.id);
+    const { error } = await updateExamRecord({
+      id: exam.id,
+      title,
+      description: description || null,
+      course_id: courseId || null,
+      pass_percentage: Number(passPercentage) || 70,
+      time_limit_minutes: Number(timeLimit) || 30,
+      is_active: isActive,
+      randomize_questions: randomize,
+    });
 
     setSaving(false);
     if (error) {
@@ -145,11 +144,7 @@ export default function ManageExamPage() {
     if (!exam || !selectedQId) return;
 
     const nextOrder = attachedQuestions.length + 1;
-    const { error } = await supabase.from('exam_questions').insert({
-      exam_id: exam.id,
-      question_id: selectedQId,
-      question_order: nextOrder,
-    });
+    const { error } = await addQuestionToExamRecord(exam.id, selectedQId, nextOrder);
 
     if (error) {
       toast({ title: 'Failed to add question', description: error.message, variant: 'destructive' });
@@ -166,11 +161,7 @@ export default function ManageExamPage() {
     if (!exam) return;
     if (!confirm('Remove this question from the exam?')) return;
 
-    const { error } = await supabase
-      .from('exam_questions')
-      .delete()
-      .eq('exam_id', exam.id)
-      .eq('question_id', questionId);
+    const { error } = await removeQuestionFromExamRecord(exam.id, questionId);
 
     if (error) {
       toast({ title: 'Failed to remove question', description: error.message, variant: 'destructive' });

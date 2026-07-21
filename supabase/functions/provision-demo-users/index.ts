@@ -45,9 +45,11 @@ Deno.serve(async (req: Request) => {
       body = {};
     }
 
-    // Action: create_exam (Bypasses RLS with service role admin)
-    if (body && body.action === "create_exam") {
-      const p = body.payload || {};
+    const action = body?.action;
+    const p = body?.payload || {};
+
+    // Action: create_exam
+    if (action === "create_exam") {
       const { data: newExam, error: examErr } = await admin
         .from("exams")
         .insert({
@@ -64,14 +66,87 @@ Deno.serve(async (req: Request) => {
 
       if (examErr) {
         return new Response(JSON.stringify({ error: examErr.message }), {
-          status: 400,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
-
       return new Response(JSON.stringify({ ok: true, exam: newExam }), {
-        status: 200,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // Action: update_exam
+    if (action === "update_exam") {
+      const { data: updExam, error: updErr } = await admin
+        .from("exams")
+        .update({
+          title: p.title,
+          description: p.description || null,
+          course_id: p.course_id || null,
+          pass_percentage: Number(p.pass_percentage) || 70,
+          time_limit_minutes: Number(p.time_limit_minutes) || 30,
+          is_active: p.is_active ?? true,
+          randomize_questions: p.randomize_questions ?? true,
+        })
+        .eq("id", p.id)
+        .select()
+        .single();
+
+      if (updErr) {
+        return new Response(JSON.stringify({ error: updErr.message }), {
+          status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify({ ok: true, exam: updExam }), {
+        status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // Action: delete_exam
+    if (action === "delete_exam") {
+      const { error: delErr } = await admin.from("exams").delete().eq("id", p.id);
+      if (delErr) {
+        return new Response(JSON.stringify({ error: delErr.message }), {
+          status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // Action: add_exam_question
+    if (action === "add_exam_question") {
+      const { error: addErr } = await admin.from("exam_questions").insert({
+        exam_id: p.exam_id,
+        question_id: p.question_id,
+        question_order: p.question_order || 1,
+      });
+
+      if (addErr) {
+        return new Response(JSON.stringify({ error: addErr.message }), {
+          status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // Action: remove_exam_question
+    if (action === "remove_exam_question") {
+      const { error: rmErr } = await admin
+        .from("exam_questions")
+        .delete()
+        .eq("exam_id", p.exam_id)
+        .eq("question_id", p.question_id);
+
+      if (rmErr) {
+        return new Response(JSON.stringify({ error: rmErr.message }), {
+          status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
