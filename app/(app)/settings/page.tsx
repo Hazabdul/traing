@@ -17,10 +17,51 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
 } from '@/components/ui/dialog';
 import {
-  Save, Clock, Award, Shield, Database, Trash2, RefreshCw, AlertTriangle, Search, CheckCircle2, ShieldAlert, Settings as SettingsIcon,
+  Save, Clock, Award, Shield, Database, Trash2, RefreshCw, AlertTriangle, Search, CheckCircle2, ShieldAlert, Settings as SettingsIcon, Plus, Edit2, Check, X,
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { logAudit } from '@/lib/audit';
+
+export interface CustomBand {
+  id: string;
+  code: string;
+  title: string;
+  minScore: number;
+  maxScore: number;
+  description: string;
+  trainingCadence: string;
+  examCadence: string;
+  enforcement: string;
+  awardEligible: boolean;
+  color: string;
+}
+
+const DEFAULT_BANDS: CustomBand[] = [
+  {
+    id: 'd1', code: 'D1', title: 'Top Performers', minScore: 90, maxScore: 100,
+    description: 'High safety compliance, zero major accidents or severe violations. Eligible for annual Safety Award bonus.',
+    trainingCadence: 'Quarterly safety refresher', examCadence: 'Annual compliance evaluation',
+    enforcement: 'Eligible for Safety Award & Clean-Record Bonus (+5)', awardEligible: true, color: '#16a34a',
+  },
+  {
+    id: 'd2', code: 'D2', title: 'Good Performers', minScore: 76, maxScore: 89,
+    description: 'Consistently safe driving record with minor infractions. Standard training schedule applies.',
+    trainingCadence: 'Monthly scheduled training', examCadence: 'Bi-monthly evaluation exams',
+    enforcement: 'Standard evaluation tier', awardEligible: false, color: '#2563eb',
+  },
+  {
+    id: 'd3', code: 'D3', title: 'Improvement Required', minScore: 51, maxScore: 75,
+    description: 'Driver requires mandatory corrective safety modules. Must show score improvement within 2 months.',
+    trainingCadence: 'System-selected corrective training', examCadence: 'Mandatory bi-monthly re-evaluations',
+    enforcement: 'Warning notice issued if unimproved in 60 days', awardEligible: false, color: '#f59e0b',
+  },
+  {
+    id: 'd4', code: 'D4', title: 'High Risk', minScore: 0, maxScore: 50,
+    description: 'Critical safety concern. Restricts transportation of hazardous goods until intensive retraining is passed.',
+    trainingCadence: 'Mandatory intensive safety training', examCadence: 'High-frequency compliance re-testing',
+    enforcement: 'Barred from hazardous cargo transport', awardEligible: false, color: '#dc2626',
+  },
+];
 
 interface TableMeta {
   name: string;
@@ -70,9 +111,50 @@ export default function SettingsPage() {
   const [tableCounts, setTableCounts] = useState<Record<string, number>>({});
   const [loadingCounts, setLoadingCounts] = useState(false);
   const [tableSearch, setTableSearch] = useState('');
+  // Rating Bands state
+  const [bands, setBands] = useState<CustomBand[]>(() => {
+    if (typeof window === 'undefined') return DEFAULT_BANDS;
+    try {
+      const raw = localStorage.getItem('safefleet_rating_bands_v1');
+      return raw ? JSON.parse(raw) : DEFAULT_BANDS;
+    } catch {
+      return DEFAULT_BANDS;
+    }
+  });
+
+  const [bandModalOpen, setBandModalOpen] = useState(false);
+  const [editingBand, setEditingBand] = useState<CustomBand | null>(null);
+
   const [confirmTable, setConfirmTable] = useState<TableMeta | null>(null);
   const [confirmPurgeAll, setConfirmPurgeAll] = useState(false);
   const [clearing, setClearing] = useState(false);
+
+  function saveBandsToStorage(list: CustomBand[]) {
+    setBands(list);
+    try { localStorage.setItem('safefleet_rating_bands_v1', JSON.stringify(list)); } catch {}
+  }
+
+  function handleSaveBand(band: CustomBand) {
+    const existingIdx = bands.findIndex((b) => b.id === band.id);
+    let updated: CustomBand[];
+    if (existingIdx !== -1) {
+      updated = [...bands];
+      updated[existingIdx] = band;
+    } else {
+      updated = [...bands, band];
+    }
+    saveBandsToStorage(updated);
+    toast({ title: 'Rating Band saved successfully' });
+    setBandModalOpen(false);
+    setEditingBand(null);
+  }
+
+  function handleDeleteBand(bandId: string, code: string) {
+    if (!confirm(`Are you sure you want to delete Rating Band ${code}?`)) return;
+    const updated = bands.filter((b) => b.id !== bandId);
+    saveBandsToStorage(updated);
+    toast({ title: `Rating Band ${code} deleted` });
+  }
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -281,75 +363,101 @@ export default function SettingsPage() {
         {/* ── Tab 2: Rating Bands & Rules ──────────────────────────────── */}
         <TabsContent value="bands">
           <Card>
-            <CardHeader className="flex-row items-center justify-between space-y-0">
+            <CardHeader className="flex-row items-center justify-between space-y-0 pb-3">
               <div>
                 <CardTitle className="text-base flex items-center gap-2">
                   <Award className="h-4 w-4 text-emerald-500" /> Rating Bands & Classification Rules
                 </CardTitle>
-                <CardDescription>Configure driver performance bands, score thresholds, descriptions, and enforcement rules.</CardDescription>
+                <CardDescription className="mt-1">Add, edit, or remove driver performance bands, score thresholds, descriptions, and enforcement rules.</CardDescription>
               </div>
+
+              {isAdmin && (
+                <Button
+                  size="sm"
+                  onClick={() => {
+                    setEditingBand({
+                      id: crypto.randomUUID(),
+                      code: 'D5',
+                      title: 'New Rating Band',
+                      minScore: 80,
+                      maxScore: 89,
+                      description: 'Custom band description...',
+                      trainingCadence: 'Monthly safety training',
+                      examCadence: 'Quarterly exam',
+                      enforcement: 'Standard evaluation',
+                      awardEligible: false,
+                      color: '#8b5cf6',
+                    });
+                    setBandModalOpen(true);
+                  }}
+                  className="gap-1 text-xs"
+                >
+                  <Plus className="h-4 w-4" /> Add Rating Band
+                </Button>
+              )}
             </CardHeader>
             <CardContent className="space-y-4 pt-2">
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                {/* D1 */}
-                <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-4 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <Badge className="bg-emerald-600 text-white font-bold">Band D1</Badge>
-                    <span className="text-xs font-bold text-emerald-700 dark:text-emerald-300">Score 90 – 100</span>
-                  </div>
-                  <h4 className="text-sm font-bold text-foreground">Top Performers</h4>
-                  <p className="text-xs text-muted-foreground">High safety compliance, zero major accidents or severe violations. Eligible for annual Safety Award bonus.</p>
-                  <div className="pt-2 text-[11px] text-emerald-700 dark:text-emerald-400 space-y-1 font-medium">
-                    <p>• Training: Quarterly safety refresher</p>
-                    <p>• Exams: Annual compliance evaluation</p>
-                    <p>• Award: Eligible for Safety Award &amp; Clean-Record Bonus (+5)</p>
-                  </div>
-                </div>
+                {bands.map((b) => (
+                  <div
+                    key={b.id}
+                    className="rounded-xl border p-4 space-y-2 transition-shadow hover:shadow-sm bg-card"
+                    style={{ borderColor: `${b.color}40`, backgroundColor: `${b.color}08` }}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Badge className="font-bold text-white" style={{ backgroundColor: b.color }}>
+                          Band {b.code}
+                        </Badge>
+                        {b.awardEligible && (
+                          <Badge variant="outline" className="text-[10px] border-emerald-500/40 text-emerald-600 font-bold">
+                            Award Eligible
+                          </Badge>
+                        )}
+                      </div>
 
-                {/* D2 */}
-                <div className="rounded-xl border border-blue-500/30 bg-blue-500/5 p-4 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <Badge className="bg-blue-600 text-white font-bold">Band D2</Badge>
-                    <span className="text-xs font-bold text-blue-700 dark:text-blue-300">Score 76 – 89</span>
-                  </div>
-                  <h4 className="text-sm font-bold text-foreground">Good Performers</h4>
-                  <p className="text-xs text-muted-foreground">Consistently safe driving record with minor infractions. Standard training schedule applies.</p>
-                  <div className="pt-2 text-[11px] text-blue-700 dark:text-blue-400 space-y-1 font-medium">
-                    <p>• Training: Monthly scheduled training</p>
-                    <p>• Exams: Bi-monthly evaluation exams</p>
-                    <p>• Award: Standard evaluation tier</p>
-                  </div>
-                </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold font-mono" style={{ color: b.color }}>
+                          Score {b.minScore} – {b.maxScore}
+                        </span>
 
-                {/* D3 */}
-                <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <Badge className="bg-amber-600 text-white font-bold">Band D3</Badge>
-                    <span className="text-xs font-bold text-amber-700 dark:text-amber-300">Score 51 – 75</span>
-                  </div>
-                  <h4 className="text-sm font-bold text-foreground">Improvement Required</h4>
-                  <p className="text-xs text-muted-foreground">Driver requires mandatory corrective safety modules. Must show score improvement within 2 months.</p>
-                  <div className="pt-2 text-[11px] text-amber-700 dark:text-amber-400 space-y-1 font-medium">
-                    <p>• Training: System-selected corrective training</p>
-                    <p>• Exams: Mandatory bi-monthly re-evaluations</p>
-                    <p>• Enforcement: Warning notice issued if unimproved in 60 days</p>
-                  </div>
-                </div>
+                        {isAdmin && (
+                          <div className="flex items-center gap-1">
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                              title="Edit Band"
+                              onClick={() => {
+                                setEditingBand(b);
+                                setBandModalOpen(true);
+                              }}
+                            >
+                              <Edit2 className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              className="h-7 w-7 text-destructive hover:bg-destructive/10"
+                              title="Delete Band"
+                              onClick={() => handleDeleteBand(b.id, b.code)}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
 
-                {/* D4 */}
-                <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-4 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <Badge className="bg-red-600 text-white font-bold">Band D4</Badge>
-                    <span className="text-xs font-bold text-red-700 dark:text-red-300">Score 0 – 50</span>
+                    <h4 className="text-sm font-bold text-foreground">{b.title}</h4>
+                    <p className="text-xs text-muted-foreground">{b.description}</p>
+                    <div className="pt-2 text-[11px] space-y-1 font-medium text-foreground/80">
+                      <p>• Training: {b.trainingCadence}</p>
+                      <p>• Exams: {b.examCadence}</p>
+                      <p>• Rule: {b.enforcement}</p>
+                    </div>
                   </div>
-                  <h4 className="text-sm font-bold text-foreground">High Risk</h4>
-                  <p className="text-xs text-muted-foreground">Critical safety concern. Restricts transportation of hazardous goods until intensive retraining is passed.</p>
-                  <div className="pt-2 text-[11px] text-red-700 dark:text-red-400 space-y-1 font-medium">
-                    <p>• Training: Mandatory intensive safety training</p>
-                    <p>• Exams: High-frequency compliance re-testing</p>
-                    <p>• Enforcement: Barred from hazardous cargo transport</p>
-                  </div>
-                </div>
+                ))}
               </div>
             </CardContent>
           </Card>
@@ -515,7 +623,106 @@ export default function SettingsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Edit / Add Rating Band Modal */}
+      {editingBand && (
+        <BandFormModal
+          open={bandModalOpen}
+          onOpenChange={(open) => {
+            setBandModalOpen(open);
+            if (!open) setEditingBand(null);
+          }}
+          band={editingBand}
+          onSave={handleSaveBand}
+        />
+      )}
     </div>
+  );
+}
+
+function BandFormModal({ open, onOpenChange, band, onSave }: {
+  open: boolean; onOpenChange: (o: boolean) => void; band: CustomBand; onSave: (b: CustomBand) => void;
+}) {
+  const [form, setForm] = useState<CustomBand>(band);
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>{band.id ? `Edit Rating Band: ${band.code}` : 'Add Rating Band'}</DialogTitle>
+          <DialogDescription>Configure score thresholds, band titles, training cadence, and descriptions.</DialogDescription>
+        </DialogHeader>
+        <div className="grid gap-3 py-2">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label className="text-xs font-bold">Band Code *</Label>
+              <Input value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value.toUpperCase() })} placeholder="e.g. D1" />
+            </div>
+            <div>
+              <Label className="text-xs font-bold">Theme Color</Label>
+              <div className="flex gap-2 items-center">
+                <input
+                  type="color"
+                  value={form.color}
+                  onChange={(e) => setForm({ ...form, color: e.target.value })}
+                  className="h-9 w-12 rounded cursor-pointer border"
+                />
+                <Input value={form.color} onChange={(e) => setForm({ ...form, color: e.target.value })} className="font-mono text-xs" />
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <Label className="text-xs font-bold">Band Title *</Label>
+            <Input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="e.g. Top Performers" />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label className="text-xs font-bold">Min Score (0-100)</Label>
+              <Input type="number" min={0} max={100} value={form.minScore} onChange={(e) => setForm({ ...form, minScore: Number(e.target.value) })} />
+            </div>
+            <div>
+              <Label className="text-xs font-bold">Max Score (0-100)</Label>
+              <Input type="number" min={0} max={100} value={form.maxScore} onChange={(e) => setForm({ ...form, maxScore: Number(e.target.value) })} />
+            </div>
+          </div>
+
+          <div>
+            <Label className="text-xs font-bold">Description</Label>
+            <Input value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="Brief summary of band criteria..." />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label className="text-xs font-bold">Training Cadence</Label>
+              <Input value={form.trainingCadence} onChange={(e) => setForm({ ...form, trainingCadence: e.target.value })} placeholder="e.g. Quarterly refresher" />
+            </div>
+            <div>
+              <Label className="text-xs font-bold">Exam Cadence</Label>
+              <Input value={form.examCadence} onChange={(e) => setForm({ ...form, examCadence: e.target.value })} placeholder="e.g. Annual exam" />
+            </div>
+          </div>
+
+          <div>
+            <Label className="text-xs font-bold">Enforcement Rule</Label>
+            <Input value={form.enforcement} onChange={(e) => setForm({ ...form, enforcement: e.target.value })} placeholder="e.g. Eligible for Safety Award" />
+          </div>
+
+          <div className="flex items-center justify-between rounded-lg border p-3">
+            <div>
+              <Label className="text-sm font-medium">Safety Award Program</Label>
+              <p className="text-xs text-muted-foreground">Driver in this band is eligible for annual Safety Award.</p>
+            </div>
+            <Switch checked={form.awardEligible} onCheckedChange={(c) => setForm({ ...form, awardEligible: c })} />
+          </div>
+        </div>
+        <DialogFooter className="mt-2">
+          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button onClick={() => onSave(form)}>Save Rating Band</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

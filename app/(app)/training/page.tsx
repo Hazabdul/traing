@@ -20,7 +20,7 @@ import {
 import { Checkbox } from '@/components/ui/checkbox';
 import {
   Plus, BookOpen, FileText, Video, Image as ImageIcon, Headphones, Presentation,
-  Clock, Globe, Edit, Trash2, Award, ClipboardCheck, ExternalLink, Settings, Sparkles
+  Clock, Globe, Edit, Trash2, Award, ClipboardCheck, ExternalLink, Settings, Sparkles, Building2, Factory, Edit2, AlertTriangle,
 } from 'lucide-react';
 import { TRAINING_FREQUENCY_LABELS, MATERIAL_TYPE_LABELS } from '@/lib/constants';
 import { useToast } from '@/hooks/use-toast';
@@ -45,6 +45,8 @@ export default function TrainingLibraryPage() {
   const [search, setSearch] = useState('');
   const [editOpen, setEditOpen] = useState(false);
   const [plantOpen, setPlantOpen] = useState(false);
+  const [managePlantsOpen, setManagePlantsOpen] = useState(false);
+  const [editingPlant, setEditingPlant] = useState<Plant | null>(null);
   const [editing, setEditing] = useState<Course | null>(null);
   const [creatingExamCourseId, setCreatingExamCourseId] = useState<string | null>(null);
   const { toast } = useToast();
@@ -140,8 +142,8 @@ export default function TrainingLibraryPage() {
         description={`${courses.length} courses available. Manage training materials and link exams.`}
         actions={canEdit ? (
           <div className="flex gap-2">
-            <Button variant="outline" size="sm" onClick={() => setPlantOpen(true)} className="gap-1">
-              <Plus className="h-4 w-4" /> Add Plant
+            <Button variant="outline" size="sm" onClick={() => setManagePlantsOpen(true)} className="gap-1">
+              <Factory className="h-4 w-4 text-amber-500" /> Manage Plants ({plants.length})
             </Button>
             <Button onClick={() => { setEditing(null); setEditOpen(true); }} size="sm" className="gap-1">
               <Plus className="h-4 w-4" /> Add Course
@@ -242,7 +244,29 @@ export default function TrainingLibraryPage() {
       </div>
 
       <CourseFormDialog open={editOpen} onOpenChange={setEditOpen} course={editing} plants={plants} onSaved={load} />
-      <PlantFormDialog open={plantOpen} onOpenChange={setPlantOpen} onSaved={load} />
+      <PlantFormDialog
+        open={plantOpen}
+        onOpenChange={(o) => {
+          setPlantOpen(o);
+          if (!o) setEditingPlant(null);
+        }}
+        plant={editingPlant}
+        onSaved={load}
+      />
+      <ManagePlantsDialog
+        open={managePlantsOpen}
+        onOpenChange={setManagePlantsOpen}
+        plants={plants}
+        onAdd={() => {
+          setEditingPlant(null);
+          setPlantOpen(true);
+        }}
+        onEdit={(p) => {
+          setEditingPlant(p);
+          setPlantOpen(true);
+        }}
+        onSaved={load}
+      />
     </div>
   );
 }
@@ -421,12 +445,24 @@ function CourseFormDialog({ open, onOpenChange, course, plants, onSaved }: {
   );
 }
 
-function PlantFormDialog({ open, onOpenChange, onSaved }: { open: boolean; onOpenChange: (o: boolean) => void; onSaved: () => void }) {
+function PlantFormDialog({ open, onOpenChange, plant, onSaved }: {
+  open: boolean; onOpenChange: (o: boolean) => void; plant?: Plant | null; onSaved: () => void;
+}) {
   const { toast } = useToast();
   const [saving, setSaving] = useState(false);
   const [name, setName] = useState('');
   const [code, setCode] = useState('');
   const [description, setDescription] = useState('');
+
+  useEffect(() => {
+    if (plant) {
+      setName(plant.name);
+      setCode(plant.code);
+      setDescription(plant.description ?? '');
+    } else {
+      setName(''); setCode(''); setDescription('');
+    }
+  }, [plant, open]);
 
   async function savePlant() {
     if (!name.trim() || !code.trim()) {
@@ -434,20 +470,37 @@ function PlantFormDialog({ open, onOpenChange, onSaved }: { open: boolean; onOpe
       return;
     }
     setSaving(true);
-    const { error } = await supabase.from('plants').insert({
-      name: name.trim(),
-      code: code.trim().toUpperCase(),
-      description: description.trim() || null,
-    });
-    setSaving(false);
 
-    if (error) {
-      toast({ title: 'Failed to create plant', description: error.message, variant: 'destructive' });
-      return;
+    if (plant) {
+      const { error } = await supabase.from('plants').update({
+        name: name.trim(),
+        code: code.trim().toUpperCase(),
+        description: description.trim() || null,
+      }).eq('id', plant.id);
+
+      setSaving(false);
+      if (error) {
+        toast({ title: 'Failed to update plant', description: error.message, variant: 'destructive' });
+        return;
+      }
+      await logAudit('update', 'plant', `Updated industrial plant: ${name} (${code})`, {}, plant.id);
+      toast({ title: 'Industrial Plant updated successfully!' });
+    } else {
+      const { error } = await supabase.from('plants').insert({
+        name: name.trim(),
+        code: code.trim().toUpperCase(),
+        description: description.trim() || null,
+      });
+
+      setSaving(false);
+      if (error) {
+        toast({ title: 'Failed to create plant', description: error.message, variant: 'destructive' });
+        return;
+      }
+      await logAudit('create', 'plant', `Created industrial plant: ${name} (${code})`);
+      toast({ title: 'Industrial Plant added successfully!' });
     }
 
-    await logAudit('create', 'plant', `Created industrial plant: ${name} (${code})`);
-    toast({ title: 'Industrial Plant added successfully!' });
     setName(''); setCode(''); setDescription('');
     onOpenChange(false);
     onSaved();
@@ -457,8 +510,8 @@ function PlantFormDialog({ open, onOpenChange, onSaved }: { open: boolean; onOpe
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Add Industrial Plant</DialogTitle>
-          <DialogDescription>Define a new industrial plant requirement (e.g., SABIC Jubail, TASNEE Yanbu, ARAMCO).</DialogDescription>
+          <DialogTitle>{plant ? `Edit Plant: ${plant.code}` : 'Add Industrial Plant'}</DialogTitle>
+          <DialogDescription>Define an industrial plant requirement (e.g., SABIC Jubail, TASNEE Yanbu, ARAMCO).</DialogDescription>
         </DialogHeader>
         <div className="grid gap-3 py-2">
           <div>
@@ -476,7 +529,90 @@ function PlantFormDialog({ open, onOpenChange, onSaved }: { open: boolean; onOpe
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button onClick={savePlant} disabled={saving}>{saving ? 'Adding...' : 'Add Plant'}</Button>
+          <Button onClick={savePlant} disabled={saving}>{saving ? 'Saving...' : plant ? 'Save Changes' : 'Add Plant'}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function ManagePlantsDialog({ open, onOpenChange, plants, onAdd, onEdit, onSaved }: {
+  open: boolean; onOpenChange: (o: boolean) => void; plants: Plant[]; onAdd: () => void; onEdit: (p: Plant) => void; onSaved: () => void;
+}) {
+  const { toast } = useToast();
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  async function deletePlant(plant: Plant) {
+    if (!confirm(`Are you sure you want to delete Industrial Plant "${plant.name}" (${plant.code})?`)) return;
+    setDeletingId(plant.id);
+
+    await supabase.from('plant_courses').delete().eq('plant_id', plant.id);
+    const { error } = await supabase.from('plants').delete().eq('id', plant.id);
+    setDeletingId(null);
+
+    if (error) {
+      toast({ title: 'Failed to delete plant', description: error.message, variant: 'destructive' });
+      return;
+    }
+
+    await logAudit('delete', 'plant', `Deleted plant: ${plant.name}`);
+    toast({ title: 'Industrial Plant deleted' });
+    onSaved();
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader className="flex-row items-center justify-between space-y-0">
+          <div>
+            <DialogTitle className="flex items-center gap-2">
+              <Factory className="h-5 w-5 text-amber-500" /> Industrial Plants Management
+            </DialogTitle>
+            <DialogDescription className="mt-1">Add, edit, or remove industrial plant compliance locations.</DialogDescription>
+          </div>
+          <Button size="sm" onClick={onAdd} className="gap-1 text-xs">
+            <Plus className="h-4 w-4" /> Add Plant
+          </Button>
+        </DialogHeader>
+
+        <div className="space-y-2 py-2 max-h-96 overflow-y-auto">
+          {plants.length === 0 ? (
+            <p className="py-8 text-center text-xs text-muted-foreground">No industrial plants configured yet.</p>
+          ) : (
+            plants.map((p) => (
+              <div key={p.id} className="flex items-center justify-between gap-3 rounded-xl border p-3 bg-card">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-bold text-foreground">{p.name}</span>
+                    <Badge variant="outline" className="text-[10px] font-mono font-bold text-primary border-primary/30">{p.code}</Badge>
+                  </div>
+                  {p.description && <p className="text-xs text-muted-foreground truncate mt-0.5">{p.description}</p>}
+                </div>
+
+                <div className="flex items-center gap-1 shrink-0">
+                  <Button
+                    size="icon" variant="ghost" className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                    title="Edit Plant"
+                    onClick={() => onEdit(p)}
+                  >
+                    <Edit2 className="h-3.5 w-3.5" />
+                  </Button>
+                  <Button
+                    size="icon" variant="ghost" className="h-8 w-8 text-destructive hover:bg-destructive/10"
+                    title="Delete Plant"
+                    disabled={deletingId === p.id}
+                    onClick={() => deletePlant(p)}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>Close</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
