@@ -203,12 +203,12 @@ function PublicTakeExamContent() {
 
   useEffect(() => { load(); }, [load]);
 
-  // Handle Driver Selection
-  function handleDriverChange(dId: string) {
-    setSelectedDriverId(dId);
-    const drv = drivers.find((d) => d.id === dId);
-    setSelectedDriver(drv ?? null);
-  }
+  // If driver is pre-set from URL, skip the identify step
+  useEffect(() => {
+    if (queryDriverId && selectedDriver) {
+      setExamStarted(true);
+    }
+  }, [queryDriverId, selectedDriver]);
 
   // Timer Countdown (Only when started)
   useEffect(() => {
@@ -436,22 +436,16 @@ function PublicTakeExamContent() {
                 </div>
               </div>
 
-              <div className="space-y-2">
-                <Label className="text-xs font-bold flex items-center gap-1.5">
-                  <UserCheck className="h-4 w-4 text-primary" /> {t.selectDriver}
-                </Label>
-                <Select value={selectedDriverId} onValueChange={handleDriverChange}>
-                  <SelectTrigger className="h-11 text-sm bg-card">
-                    <SelectValue placeholder={t.driverLabel} />
-                  </SelectTrigger>
-                  <SelectContent className="max-h-60">
-                    {drivers.map((d) => (
-                      <SelectItem key={d.id} value={d.id} className="text-xs">
-                        <span className="font-bold">{d.full_name}</span> ({d.employee_id})
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+              {/* Driver identity — static display if pre-set from assignment, no option to change */}
+              <div className="flex items-center gap-3 rounded-xl border bg-muted/40 px-4 py-3">
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary font-bold text-sm">
+                  {selectedDriver?.full_name?.charAt(0) ?? '?'}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-bold truncate">{selectedDriver?.full_name ?? '—'}</p>
+                  <p className="text-xs text-muted-foreground">{selectedDriver?.employee_id}</p>
+                </div>
+                <UserCheck className="h-4 w-4 text-emerald-500 shrink-0" />
               </div>
 
               <Button

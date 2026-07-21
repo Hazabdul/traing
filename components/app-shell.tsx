@@ -42,8 +42,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="flex min-h-screen bg-background">
-      <Sidebar open={menuOpen} onClose={() => setMenuOpen(false)} />
-      <div className="flex min-w-0 flex-1 flex-col transition-all duration-300">
+      <Sidebar open={menuOpen} onClose={() => setMenuOpen((prev) => !prev)} />
+      {/* Content shifts smoothly: 256px when open, 64px icon-rail when collapsed */}
+      <div className={`flex min-w-0 flex-1 flex-col transition-all duration-300`}>
         <Topbar onMenuClick={() => setMenuOpen((prev) => !prev)} isSidebarOpen={menuOpen} />
         <main className="scrollbar-thin flex-1 overflow-x-hidden p-4 lg:p-6">
           <div className="mx-auto max-w-7xl animate-fade-in">{children}</div>
