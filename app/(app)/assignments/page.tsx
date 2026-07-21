@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase-client';
 import { useAuth } from '@/lib/auth-context';
-import type { Training, Course, Driver, TrainingStatus, DriverRatingBand, Exam } from '@/lib/database-types';
+import type { Training, Course, Driver, TrainingStatus, DriverRatingBand, TrainingMaterial, Certificate } from '@/lib/database-types';
 import { PageHeader } from '@/components/page-header';
 import { DataTable } from '@/components/data-table';
 import { Button } from '@/components/ui/button';
@@ -13,7 +13,7 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { DatePicker } from '@/components/date-picker';
-import { Card, CardContent } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
@@ -21,10 +21,11 @@ import {
 import { Label } from '@/components/ui/label';
 import {
   Plus, Zap, Download, Edit2, Trash2, CheckCircle2, Clock, AlertTriangle, XCircle,
-  GraduationCap, Bell, RefreshCw, ClipboardCheck, Play, Sparkles
+  GraduationCap, Bell, RefreshCw, ClipboardCheck, Play, Sparkles, User, BookOpen,
+  FileText, Video, Presentation, Headphones, Image as ImageIcon, Award, ExternalLink, Calendar, ShieldCheck
 } from 'lucide-react';
 import type { ColumnDef } from '@tanstack/react-table';
-import { TRAINING_STATUS_LABELS, TRAINING_STATUS_COLORS, RATING_BAND_COLORS } from '@/lib/constants';
+import { TRAINING_STATUS_LABELS, TRAINING_STATUS_COLORS, RATING_BAND_COLORS, MATERIAL_TYPE_LABELS } from '@/lib/constants';
 import { formatDate, classNamesForDue } from '@/lib/format';
 import { exportToCSV } from '@/lib/export';
 import { useToast } from '@/hooks/use-toast';
@@ -37,7 +38,19 @@ interface AssignmentRow extends Training {
   driver_band?: DriverRatingBand;
   exam_id?: string | null;
   exam_title?: string | null;
+  course?: Course;
+  driver?: Driver;
+  materials?: TrainingMaterial[];
+  certificate?: Certificate | null;
 }
+
+const MATERIAL_ICONS: Record<string, typeof FileText> = {
+  pdf: FileText,
+  powerpoint: Presentation,
+  video: Video,
+  audio: Headphones,
+  image: ImageIcon,
+};
 
 export default function AdvancedAssignmentsPage() {
   const router = useRouter();
@@ -55,8 +68,10 @@ export default function AdvancedAssignmentsPage() {
   const [courseFilter, setCourseFilter] = useState('all');
   const [assignOpen, setAssignOpen] = useState(false);
 
-  // Edit status modal state
-  const [editRow, setEditRow] = useState<AssignmentRow | null>(null);
+  // Detail Modal state
+  const [selectedAssignment, setSelectedAssignment] = useState<AssignmentRow | null>(null);
+  const [detailMaterials, setDetailMaterials] = useState<TrainingMaterial[]>([]);
+  const [detailCertificate, setDetailCertificate] = useState<Certificate | null>(null);
   const [editStatus, setEditStatus] = useState<TrainingStatus>('assigned');
   const [editScore, setEditScore] = useState<string>('');
   const [editDueDate, setEditDueDate] = useState<string>('');
@@ -128,12 +143,33 @@ export default function AdvancedAssignmentsPage() {
     });
   }, [rows, activeTab, bandFilter, courseFilter]);
 
-  function openEditModal(row: AssignmentRow) {
-    setEditRow(row);
+  async function openDetailModal(row: AssignmentRow) {
+    setSelectedAssignment(row);
     setEditStatus(row.status);
     setEditScore(row.score !== null && row.score !== undefined ? String(row.score) : '');
     setEditDueDate(row.due_date ?? '');
     setEditCompletedDate(row.completed_date ?? '');
+
+    // Fetch course materials
+    if (row.course_id) {
+      const { data: mats } = await supabase.from('training_materials').select('*').eq('course_id', row.course_id);
+      setDetailMaterials((mats ?? []) as TrainingMaterial[]);
+    } else {
+      setDetailMaterials([]);
+    }
+
+    // Fetch certificate if completed
+    if (row.driver_id && row.course_id) {
+      const { data: cert } = await supabase
+        .from('certificates')
+        .select('*')
+        .eq('driver_id', row.driver_id)
+        .eq('course_id', row.course_id)
+        .maybeSingle();
+      setDetailCertificate(cert as Certificate | null);
+    } else {
+      setDetailCertificate(null);
+    }
   }
 
   async function updateInlineStatus(row: AssignmentRow, newStatus: TrainingStatus) {
@@ -183,7 +219,7 @@ export default function AdvancedAssignmentsPage() {
   }
 
   async function saveTrainingStatus() {
-    if (!editRow) return;
+    if (!selectedAssignment) return;
     setUpdating(true);
 
     const isCompleted = editStatus === 'completed';
@@ -199,7 +235,7 @@ export default function AdvancedAssignmentsPage() {
         due_date: editDueDate || null,
         completed_date: compDate,
       })
-      .eq('id', editRow.id);
+      .eq('id', selectedAssignment.id);
 
     setUpdating(false);
     if (error) {
@@ -207,13 +243,13 @@ export default function AdvancedAssignmentsPage() {
       return;
     }
 
-    await logAudit('status_change', 'training', `Changed training status for ${editRow.driver_name} to ${editStatus}`, {
+    await logAudit('status_change', 'training', `Changed training status for ${selectedAssignment.driver_name} to ${editStatus}`, {
       status: editStatus,
       score: editScore,
-    }, editRow.driver_id);
+    }, selectedAssignment.driver_id);
 
-    toast({ title: 'Training status updated' });
-    setEditRow(null);
+    toast({ title: 'Training details updated successfully' });
+    setSelectedAssignment(null);
     load();
   }
 
@@ -225,6 +261,7 @@ export default function AdvancedAssignmentsPage() {
       return;
     }
     toast({ title: 'Assignment deleted' });
+    if (selectedAssignment?.id === id) setSelectedAssignment(null);
     load();
   }
 
@@ -290,15 +327,22 @@ export default function AdvancedAssignmentsPage() {
     {
       accessorKey: 'driver_name', header: 'Driver',
       cell: ({ row }) => (
-        <div>
-          <p className="font-medium text-foreground">{row.original.driver_name ?? '—'}</p>
+        <button
+          onClick={() => router.push(`/assignments/${row.original.id}`)}
+          className="text-left hover:underline group cursor-pointer"
+        >
+          <p className="font-semibold text-foreground group-hover:text-primary transition-colors">{row.original.driver_name ?? '—'}</p>
           <p className="text-xs text-muted-foreground">{row.original.employee_id}</p>
-        </div>
+        </button>
       ),
     },
     {
       accessorKey: 'course_title', header: 'Course',
-      cell: ({ row }) => <span className="font-medium text-sm">{row.original.course_title}</span>,
+      cell: ({ row }) => (
+        <button onClick={() => router.push(`/assignments/${row.original.id}`)} className="text-left hover:underline cursor-pointer">
+          <span className="font-semibold text-sm text-foreground">{row.original.course_title}</span>
+        </button>
+      ),
     },
     {
       accessorKey: 'status', header: 'Status & Change',
@@ -370,8 +414,8 @@ export default function AdvancedAssignmentsPage() {
       id: 'actions', header: 'Actions',
       cell: ({ row }) => (
         <div className="flex items-center gap-1">
-          <Button size="sm" variant="outline" className="h-8 text-xs gap-1" onClick={() => openEditModal(row.original)}>
-            <Edit2 className="h-3.5 w-3.5" /> Details
+          <Button size="sm" variant="default" className="h-8 text-xs gap-1 shadow-xs" onClick={() => router.push(`/assignments/${row.original.id}`)}>
+            <Edit2 className="h-3.5 w-3.5" /> Detailed View
           </Button>
           {canEdit && (
             <Button size="sm" variant="ghost" className="h-8 w-8 p-0 text-destructive hover:text-destructive" onClick={() => deleteAssignment(row.original.id, row.original.driver_name)} title="Delete Assignment">
@@ -391,7 +435,7 @@ export default function AdvancedAssignmentsPage() {
     <div className="space-y-6">
       <PageHeader
         title="Training Assignments & Compliance"
-        description="Enterprise training status dashboard — launch evaluation exams or update training status directly."
+        description="Enterprise training status dashboard — click Detailed View on any row for full course materials, exam, and driver info."
         actions={
           <div className="flex flex-wrap gap-2">
             <Button variant="outline" size="sm" onClick={() => exportToCSV(filteredRows.map((r) => ({
@@ -534,85 +578,198 @@ export default function AdvancedAssignmentsPage() {
       {/* Manual Assign Modal */}
       <ManualAssignDialog open={assignOpen} onOpenChange={setAssignOpen} drivers={drivers} courses={courses} onSaved={load} />
 
-      {/* Change Status / Edit Details Modal */}
-      <Dialog open={!!editRow} onOpenChange={(open) => !open && setEditRow(null)}>
-        <DialogContent>
+      {/* Comprehensive Detailed View Modal */}
+      <Dialog open={!!selectedAssignment} onOpenChange={(open) => !open && setSelectedAssignment(null)}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Edit Assignment Details</DialogTitle>
-            <DialogDescription>
-              Update status, score, due date, and completion date for {editRow?.driver_name}'s assignment ({editRow?.course_title}).
-            </DialogDescription>
+            <div className="flex items-start justify-between gap-3 pr-6">
+              <div>
+                <DialogTitle className="text-xl leading-tight">{selectedAssignment?.course_title}</DialogTitle>
+                <DialogDescription className="mt-1">
+                  Assignment Details & Compliance Tracking for {selectedAssignment?.driver_name}
+                </DialogDescription>
+              </div>
+              <Badge variant="secondary" className={selectedAssignment ? TRAINING_STATUS_COLORS[selectedAssignment.status] : ''}>
+                {selectedAssignment ? TRAINING_STATUS_LABELS[selectedAssignment.status] : ''}
+              </Badge>
+            </div>
           </DialogHeader>
-          <div className="grid gap-4 py-2">
-            <div>
-              <Label className="text-xs font-semibold">Training Status</Label>
-              <Select value={editStatus} onValueChange={(val) => setEditStatus(val as TrainingStatus)}>
-                <SelectTrigger className="w-full mt-1">
-                  <SelectValue placeholder="Select status" />
-                </SelectTrigger>
-                <SelectContent>
-                  {(Object.keys(TRAINING_STATUS_LABELS) as TrainingStatus[]).map((st) => (
-                    <SelectItem key={st} value={st}>
-                      {TRAINING_STATUS_LABELS[st]}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+
+          <div className="grid gap-6 py-2">
+            {/* Driver Profile Summary Box */}
+            <div className="rounded-xl border border-border/60 bg-muted/30 p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 text-primary font-bold">
+                    <User className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-bold text-foreground">{selectedAssignment?.driver_name}</h4>
+                    <p className="text-xs text-muted-foreground">ID: {selectedAssignment?.employee_id} · Band: {selectedAssignment?.driver_band ?? '—'}</p>
+                  </div>
+                </div>
+                {selectedAssignment?.driver_id && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 text-xs gap-1"
+                    onClick={() => { setSelectedAssignment(null); router.push(`/drivers/${selectedAssignment.driver_id}`); }}
+                  >
+                    View Driver Profile <ExternalLink className="h-3 w-3" />
+                  </Button>
+                )}
+              </div>
             </div>
 
-            <div>
-              <Label className="text-xs font-semibold font-mono">Evaluation Exam</Label>
-              {editRow?.exam_id ? (
-                <div className="mt-1 flex items-center justify-between rounded-lg border border-primary/20 bg-primary/5 p-2.5">
-                  <span className="text-xs font-medium text-primary flex items-center gap-1.5">
-                    <ClipboardCheck className="h-4 w-4" /> {editRow.exam_title ?? 'Course Exam'}
-                  </span>
-                  <Button size="sm" className="h-7 text-xs gap-1" onClick={() => { setEditRow(null); router.push(`/exams/${editRow.exam_id}/take`); }}>
-                    <Play className="h-3 w-3" /> Start Exam
+            {/* Course Info & Attached Materials */}
+            <div className="space-y-3">
+              <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                <BookOpen className="h-4 w-4 text-primary" /> Course Information & Training Materials
+              </h4>
+
+              <div className="grid grid-cols-2 gap-3 text-xs bg-card p-3 rounded-lg border">
+                <div><span className="text-muted-foreground">Category:</span> <span className="font-semibold">{selectedAssignment?.course?.category ?? 'General Safety'}</span></div>
+                <div><span className="text-muted-foreground">Language:</span> <span className="font-semibold">{selectedAssignment?.course?.language ?? 'English'}</span></div>
+                <div><span className="text-muted-foreground">Duration:</span> <span className="font-semibold">{selectedAssignment?.course?.duration_hours ?? 1} hours</span></div>
+                <div><span className="text-muted-foreground">Pass Mark:</span> <span className="font-semibold">{selectedAssignment?.course?.pass_percentage ?? 70}%</span></div>
+              </div>
+
+              {detailMaterials.length > 0 ? (
+                <div className="space-y-1.5">
+                  <p className="text-xs font-semibold text-muted-foreground">Attached Learning Materials ({detailMaterials.length}):</p>
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    {detailMaterials.map((m) => {
+                      const Icon = MATERIAL_ICONS[m.material_type] ?? FileText;
+                      return (
+                        <a
+                          key={m.id}
+                          href={m.file_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="flex items-center gap-2 rounded-lg border p-2.5 text-xs hover:bg-muted transition-colors"
+                        >
+                          <Icon className="h-4 w-4 text-primary shrink-0" />
+                          <div className="min-w-0 flex-1 truncate">
+                            <p className="font-semibold truncate">{m.title}</p>
+                            <p className="text-[10px] text-muted-foreground uppercase">{m.material_type} · v{m.version}</p>
+                          </div>
+                        </a>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : (
+                <p className="text-xs text-muted-foreground italic">No uploaded training files attached to this course.</p>
+              )}
+            </div>
+
+            {/* Evaluation Exam & Certificate Section */}
+            <div className="space-y-3">
+              <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                <ClipboardCheck className="h-4 w-4 text-primary" /> Evaluation Exam & Certificate
+              </h4>
+
+              {selectedAssignment?.exam_id ? (
+                <div className="flex items-center justify-between rounded-xl border border-primary/20 bg-primary/5 p-3.5">
+                  <div>
+                    <p className="text-sm font-bold text-primary flex items-center gap-1.5">
+                      <Sparkles className="h-4 w-4" /> {selectedAssignment.exam_title ?? 'Course Evaluation Exam'}
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-0.5">Automated scoring with instant certificate issuance upon passing.</p>
+                  </div>
+                  <Button
+                    size="sm"
+                    className="gap-1.5 shadow-sm"
+                    onClick={() => {
+                      const examId = selectedAssignment.exam_id;
+                      setSelectedAssignment(null);
+                      router.push(`/exams/${examId}/take`);
+                    }}
+                  >
+                    <Play className="h-4 w-4" /> Start Exam
                   </Button>
                 </div>
               ) : (
-                <div className="mt-1 flex items-center justify-between rounded-lg border p-2 text-xs text-muted-foreground">
-                  <span>No evaluation exam linked to this course</span>
+                <div className="flex items-center justify-between rounded-xl border p-3.5 text-xs text-muted-foreground">
+                  <span>No evaluation exam currently linked to this course.</span>
                   {canEdit && (
-                    <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => editRow && createExamForCourse(editRow)}>
+                    <Button size="sm" variant="outline" onClick={() => selectedAssignment && createExamForCourse(selectedAssignment)}>
                       + Create Exam
                     </Button>
                   )}
                 </div>
               )}
+
+              {detailCertificate && (
+                <div className="flex items-center gap-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-xs text-emerald-700 dark:text-emerald-300">
+                  <ShieldCheck className="h-5 w-5 shrink-0 text-emerald-600" />
+                  <div>
+                    <p className="font-bold">Issued Certificate: {detailCertificate.certificate_number}</p>
+                    <p className="text-[11px] opacity-80">Issued on {formatDate(detailCertificate.issued_at)}</p>
+                  </div>
+                </div>
+              )}
             </div>
 
-            <div>
-              <Label className="text-xs font-semibold">Score (%)</Label>
-              <Input
-                type="number"
-                min={0}
-                max={100}
-                value={editScore}
-                onChange={(e) => setEditScore(e.target.value)}
-                placeholder="e.g. 85"
-                className="mt-1"
-              />
-            </div>
+            {/* Interactive Status & Dates Editor */}
+            <div className="space-y-3 border-t pt-4">
+              <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Manage Assignment State</h4>
 
-            <div>
-              <Label className="text-xs font-semibold">Due Date</Label>
-              <DatePicker value={editDueDate} onChange={setEditDueDate} />
-            </div>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div>
+                  <Label className="text-xs font-semibold">Training Status</Label>
+                  <Select value={editStatus} onValueChange={(val) => setEditStatus(val as TrainingStatus)}>
+                    <SelectTrigger className="w-full mt-1 text-xs">
+                      <SelectValue placeholder="Select status" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(Object.keys(TRAINING_STATUS_LABELS) as TrainingStatus[]).map((st) => (
+                        <SelectItem key={st} value={st} className="text-xs">
+                          {TRAINING_STATUS_LABELS[st]}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
 
-            {(editStatus === 'completed' || editStatus === 'failed') && (
-              <div>
-                <Label className="text-xs font-semibold">Completed Date</Label>
-                <DatePicker value={editCompletedDate} onChange={setEditCompletedDate} />
+                <div>
+                  <Label className="text-xs font-semibold">Achieved Score (%)</Label>
+                  <Input
+                    type="number"
+                    min={0}
+                    max={100}
+                    value={editScore}
+                    onChange={(e) => setEditScore(e.target.value)}
+                    placeholder="e.g. 85"
+                    className="mt-1 text-xs"
+                  />
+                </div>
+
+                <div>
+                  <Label className="text-xs font-semibold">Due Date</Label>
+                  <DatePicker value={editDueDate} onChange={setEditDueDate} />
+                </div>
+
+                <div>
+                  <Label className="text-xs font-semibold">Completed Date</Label>
+                  <DatePicker value={editCompletedDate} onChange={setEditCompletedDate} />
+                </div>
               </div>
-            )}
+            </div>
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setEditRow(null)}>Cancel</Button>
-            <Button onClick={saveTrainingStatus} disabled={updating}>
-              {updating ? 'Saving...' : 'Update Assignment'}
-            </Button>
+
+          <DialogFooter className="flex items-center justify-between sm:justify-between border-t pt-3">
+            {canEdit ? (
+              <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive gap-1" onClick={() => selectedAssignment && deleteAssignment(selectedAssignment.id, selectedAssignment.driver_name)}>
+                <Trash2 className="h-4 w-4" /> Delete Assignment
+              </Button>
+            ) : <div />}
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => setSelectedAssignment(null)}>Close</Button>
+              <Button onClick={saveTrainingStatus} disabled={updating}>
+                {updating ? 'Saving...' : 'Save Changes'}
+              </Button>
+            </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>
