@@ -226,8 +226,8 @@ export default function AdvancedAssignmentsPage() {
       return;
     }
 
-    toast({ title: 'Exam created and linked!', description: 'Redirecting to add exam questions...' });
-    router.push(`/exams/${newExam.id}`);
+    toast({ title: 'Exam generated!', description: `"${row.course_title} Final Exam" is ready.` });
+    load();
   }
 
   async function saveTrainingStatus() {
