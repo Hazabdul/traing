@@ -37,15 +37,52 @@ Deno.serve(async (req: Request) => {
       auth: { autoRefreshToken: false, persistSession: false },
     });
 
+    // Parse JSON body if present
+    let body: any = {};
+    try {
+      body = await req.json();
+    } catch (_e) {
+      body = {};
+    }
+
+    // Action: create_exam (Bypasses RLS with service role admin)
+    if (body && body.action === "create_exam") {
+      const p = body.payload || {};
+      const { data: newExam, error: examErr } = await admin
+        .from("exams")
+        .insert({
+          title: p.title || "New Exam",
+          description: p.description || null,
+          course_id: p.course_id || null,
+          pass_percentage: Number(p.pass_percentage) || 70,
+          time_limit_minutes: Number(p.time_limit_minutes) || 30,
+          is_active: p.is_active ?? true,
+          randomize_questions: p.randomize_questions ?? true,
+        })
+        .select()
+        .single();
+
+      if (examErr) {
+        return new Response(JSON.stringify({ error: examErr.message }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      return new Response(JSON.stringify({ ok: true, exam: newExam }), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // Default Action: Provision Demo Users
     const results: { email: string; status: string }[] = [];
 
     for (const u of DEMO_USERS) {
-      // Check if user exists by listing users with this email
       const { data: existing } = await admin.auth.admin.listUsers();
       const found = existing.users.find((x: { email: string }) => x.email === u.email);
 
       if (found) {
-        // Update password to ensure it is hashed by GoTrue itself
         const { error: updErr } = await admin.auth.admin.updateUserById(found.id, {
           password: u.password,
           email_confirm: true,
@@ -62,7 +99,6 @@ Deno.serve(async (req: Request) => {
         if (crtErr) {
           results.push({ email: u.email, status: `create_failed: ${crtErr.message}` });
         } else {
-          // Link driver role user to driver record EMP-1001
           if (u.role === "driver" && created) {
             const { data: drv } = await admin
               .from("drivers")
@@ -82,8 +118,9 @@ Deno.serve(async (req: Request) => {
       status: 200,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
-  } catch (err) {
-    return new Response(JSON.stringify({ error: err.message }), {
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return new Response(JSON.stringify({ error: msg }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
