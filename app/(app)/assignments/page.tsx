@@ -226,8 +226,11 @@ export default function AdvancedAssignmentsPage() {
       return;
     }
 
-    toast({ title: 'Exam generated!', description: `"${row.course_title} Final Exam" is ready.` });
+    toast({ title: 'Exam generated!', description: `Opening exam for ${row.driver_name}…` });
     load();
+    // Open exam in new tab so driver can start immediately
+    const url = `/take-exam/${newExam.id}${row.driver_id ? `?driver_id=${row.driver_id}` : ''}`;
+    window.open(url, '_blank');
   }
 
   async function saveTrainingStatus() {
