@@ -122,7 +122,28 @@ export default function SettingsPage() {
 
   async function clearSingleTable(table: TableMeta) {
     setClearing(true);
-    const { error } = await supabase.from(table.name).delete().neq(table.primaryCol, '00000000-0000-0000-0000-000000000000');
+
+    // Fetch existing IDs first to ensure valid Supabase PostgREST delete filter
+    const { data: rows, error: fetchErr } = await supabase.from(table.name).select(table.primaryCol);
+
+    if (fetchErr) {
+      setClearing(false);
+      setConfirmTable(null);
+      toast({ title: `Failed to read ${table.label}`, description: fetchErr.message, variant: 'destructive' });
+      return;
+    }
+
+    if (!rows || rows.length === 0) {
+      setClearing(false);
+      setConfirmTable(null);
+      toast({ title: 'Table is empty', description: `${table.label} has no records to delete.` });
+      loadTableCounts();
+      return;
+    }
+
+    const ids = rows.map((r: any) => r[table.primaryCol]).filter(Boolean);
+    const { error } = await supabase.from(table.name).delete().in(table.primaryCol, ids);
+
     setClearing(false);
     setConfirmTable(null);
 
@@ -135,7 +156,7 @@ export default function SettingsPage() {
       try { localStorage.removeItem('safefleet_local_questions_v1'); } catch {}
     }
 
-    toast({ title: 'Table Cleared', description: `All records removed from ${table.label}.` });
+    toast({ title: 'Table Cleared', description: `Successfully deleted ${ids.length} records from ${table.label}.` });
     await logAudit('delete', table.name, `Admin purged table ${table.name}`);
     loadTableCounts();
   }
@@ -153,7 +174,11 @@ export default function SettingsPage() {
     for (const tableName of order) {
       const meta = MANAGED_TABLES.find((m) => m.name === tableName);
       const col = meta?.primaryCol ?? 'id';
-      await supabase.from(tableName).delete().neq(col, '00000000-0000-0000-0000-000000000000');
+      const { data: rows } = await supabase.from(tableName).select(col);
+      if (rows && rows.length > 0) {
+        const ids = rows.map((r: any) => r[col]).filter(Boolean);
+        await supabase.from(tableName).delete().in(col, ids);
+      }
     }
 
     try { localStorage.removeItem('safefleet_local_questions_v1'); } catch {}
