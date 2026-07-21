@@ -116,14 +116,14 @@ export default function ManageExamPage() {
 
   function copyShareableLink() {
     if (!exam) return;
-    const url = `${window.location.origin}/exams/${exam.id}/take`;
+    const url = `${window.location.origin}/take-exam/${exam.id}`;
     navigator.clipboard.writeText(url);
-    toast({ title: 'Link copied to clipboard!', description: 'Drivers can use this link to take the exam.' });
+    toast({ title: 'Link copied to clipboard!', description: 'Public exam link copied to clipboard.' });
   }
 
   function shareOnWhatsApp() {
     if (!exam) return;
-    const url = `${window.location.origin}/exams/${exam.id}/take`;
+    const url = `${window.location.origin}/take-exam/${exam.id}`;
     const message = `📋 SafeFleet Evaluation Exam: ${exam.title}\n\nPlease click the link below to take your assigned evaluation exam:\n${url}`;
     window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(message)}`, '_blank');
   }

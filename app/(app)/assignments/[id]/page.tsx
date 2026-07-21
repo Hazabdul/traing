@@ -119,14 +119,14 @@ export default function AssignmentDetailPage() {
 
   function copyExamShareLink() {
     if (!data?.exam) return;
-    const url = `${window.location.origin}/exams/${data.exam.id}/take`;
+    const url = `${window.location.origin}/take-exam/${data.exam.id}?driver_id=${data.driver_id}`;
     navigator.clipboard.writeText(url);
-    toast({ title: 'Shareable link copied!', description: 'Exam link copied to clipboard.' });
+    toast({ title: 'Shareable link copied!', description: 'Public exam link copied to clipboard.' });
   }
 
   function shareExamWhatsApp() {
     if (!data?.exam) return;
-    const url = `${window.location.origin}/exams/${data.exam.id}/take`;
+    const url = `${window.location.origin}/take-exam/${data.exam.id}?driver_id=${data.driver_id}`;
     const message = `📋 Evaluation Exam: ${data.exam.title}\n\nPlease click the link below to complete your evaluation exam:\n${url}`;
     window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(message)}`, '_blank');
   }

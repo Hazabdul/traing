@@ -390,7 +390,7 @@ export default function AdvancedAssignmentsPage() {
                   size="sm"
                   variant={isDone || attempts > 0 ? "outline" : "default"}
                   className={`h-8 text-xs gap-1 ${isDone || attempts > 0 ? 'border-primary/40 text-primary hover:bg-primary/10' : 'shadow-xs'}`}
-                  onClick={() => router.push(`/exams/${row.original.exam_id}/take`)}
+                  onClick={() => router.push(`/take-exam/${row.original.exam_id}?driver_id=${row.original.driver_id}`)}
                 >
                   {attempts > 0 || isDone ? (
                     <>
@@ -408,9 +408,9 @@ export default function AdvancedAssignmentsPage() {
                   className="h-8 w-8 text-muted-foreground hover:text-foreground"
                   title="Copy Exam Share Link"
                   onClick={() => {
-                    const url = `${window.location.origin}/exams/${row.original.exam_id}/take`;
+                    const url = `${window.location.origin}/take-exam/${row.original.exam_id}?driver_id=${row.original.driver_id}`;
                     navigator.clipboard.writeText(url);
-                    toast({ title: 'Shareable link copied!', description: 'Exam URL copied to clipboard.' });
+                    toast({ title: 'Shareable link copied!', description: 'Public exam URL copied to clipboard.' });
                   }}
                 >
                   <Copy className="h-3.5 w-3.5" />
@@ -421,8 +421,8 @@ export default function AdvancedAssignmentsPage() {
                   className="h-8 w-8 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/40"
                   title="Share to WhatsApp"
                   onClick={() => {
-                    const url = `${window.location.origin}/exams/${row.original.exam_id}/take`;
-                    const msg = `📋 SafeFleet Evaluation Exam: ${row.original.exam_title ?? 'Course Exam'}\n\nPlease click the link to start your exam:\n${url}`;
+                    const url = `${window.location.origin}/take-exam/${row.original.exam_id}?driver_id=${row.original.driver_id}`;
+                    const msg = `📋 SafeFleet Evaluation Exam: ${row.original.exam_title ?? 'Course Exam'}\n\nPlease click the link below to take your exam:\n${url}`;
                     window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(msg)}`, '_blank');
                   }}
                 >

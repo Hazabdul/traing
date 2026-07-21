@@ -158,14 +158,14 @@ export default function ExamsPage() {
                   <div className="mt-4 space-y-2">
                     <div className="flex gap-2">
                       <Button variant="outline" size="sm" className="flex-1 text-xs gap-1" onClick={() => {
-                        const url = `${window.location.origin}/exams/${ex.id}/take`;
+                        const url = `${window.location.origin}/take-exam/${ex.id}`;
                         navigator.clipboard.writeText(url);
-                        toast({ title: 'Shareable link copied!', description: 'Exam URL copied to clipboard.' });
+                        toast({ title: 'Shareable link copied!', description: 'Public exam URL copied to clipboard.' });
                       }}>
                         <Copy className="h-3.5 w-3.5" /> Copy Link
                       </Button>
                       <Button variant="default" size="sm" className="flex-1 text-xs gap-1 bg-emerald-600 hover:bg-emerald-700 text-white" onClick={() => {
-                        const url = `${window.location.origin}/exams/${ex.id}/take`;
+                        const url = `${window.location.origin}/take-exam/${ex.id}`;
                         const msg = `📋 SafeFleet Evaluation Exam: ${ex.title}\n\nPlease click the link to start your exam:\n${url}`;
                         window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(msg)}`, '_blank');
                       }}>
