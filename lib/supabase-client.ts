@@ -2,12 +2,13 @@
 
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL as string;
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY as string;
+const supabaseUrl =
+  process.env.NEXT_PUBLIC_SUPABASE_URL ||
+  'https://rvcfhnwqatxdldobpmss.supabase.co';
 
-if (!supabaseUrl || !supabaseAnonKey) {
-  throw new Error('Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY');
-}
+const supabaseAnonKey =
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ2Y2ZobndxYXR4ZGxkb2JwbXNzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ2MjAyMDMsImV4cCI6MjEwMDE5NjIwM30.4-4saXGQzRAksYJBnlIttSXC0v63CUbGHzTUIIs3gLU';
 
 /**
  * Untyped Supabase client. We keep hand-maintained row types in
