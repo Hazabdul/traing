@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase-client';
 import { useAuth } from '@/lib/auth-context';
-import type { Training, Course, Driver, TrainingStatus, DriverRatingBand, TrainingMaterial, Certificate } from '@/lib/database-types';
+import type { Training, Course, Driver, TrainingStatus, DriverRatingBand, TrainingMaterial, Certificate, Exam } from '@/lib/database-types';
 import { PageHeader } from '@/components/page-header';
 import { DataTable } from '@/components/data-table';
 import { Button } from '@/components/ui/button';
@@ -787,52 +787,205 @@ function ManualAssignDialog({ open, onOpenChange, drivers, courses, onSaved }: {
   const [courseId, setCourseId] = useState('');
   const [dueDate, setDueDate] = useState('');
 
+  // Exam option states
+  const [existingExam, setExistingExam] = useState<Exam | null>(null);
+  const [autoCreateExam, setAutoCreateExam] = useState(true);
+  const [examTitle, setExamTitle] = useState('');
+  const [passPercentage, setPassPercentage] = useState('70');
+  const [timeLimit, setTimeLimit] = useState('30');
+  const [checkingExam, setCheckingExam] = useState(false);
+
+  useEffect(() => {
+    if (!courseId) {
+      setExistingExam(null);
+      setExamTitle('');
+      return;
+    }
+
+    const selectedCourse = courses.find((c) => c.id === courseId);
+    if (selectedCourse) {
+      setExamTitle(`${selectedCourse.title} Final Exam`);
+      setPassPercentage(String(selectedCourse.pass_percentage ?? 70));
+    }
+
+    async function checkExam() {
+      setCheckingExam(true);
+      const { data: ex } = await supabase.from('exams').select('*').eq('course_id', courseId).eq('is_active', true).maybeSingle();
+      setExistingExam((ex as Exam | null) ?? null);
+      setCheckingExam(false);
+    }
+    checkExam();
+  }, [courseId, courses]);
+
   async function save() {
     if (!driverId || !courseId) { toast({ title: 'Select driver and course', variant: 'destructive' }); return; }
     setSaving(true);
+
+    let finalExamId = existingExam?.id ?? null;
+
+    // Create exam if option selected and no exam exists
+    if (!existingExam && autoCreateExam && examTitle.trim()) {
+      const { data: newExam, error: examErr } = await createExamRecord({
+        title: examTitle.trim(),
+        description: `Evaluation exam for course`,
+        course_id: courseId,
+        pass_percentage: Number(passPercentage) || 70,
+        time_limit_minutes: Number(timeLimit) || 30,
+        is_active: true,
+        randomize_questions: true,
+      });
+
+      if (examErr) {
+        console.warn('Exam creation notice:', examErr.message);
+      } else if (newExam) {
+        finalExamId = newExam.id;
+      }
+    }
+
     const { error } = await supabase.from('trainings').insert({
-      driver_id: driverId, course_id: courseId, status: 'assigned', due_date: dueDate || null, source: 'manual',
+      driver_id: driverId,
+      course_id: courseId,
+      status: 'assigned',
+      due_date: dueDate || null,
+      source: 'manual',
     });
+
     setSaving(false);
-    if (error) { toast({ title: 'Failed', description: error.message, variant: 'destructive' }); return; }
+    if (error) { toast({ title: 'Failed to assign course', description: error.message, variant: 'destructive' }); return; }
+
     const drv = drivers.find((d) => d.id === driverId);
     const crs = courses.find((c) => c.id === courseId);
     await logAudit('assign', 'training', `Assigned ${crs?.title} to ${drv?.full_name}`, {}, driverId);
+
     const { data: prof } = await supabase.from('profiles').select('user_id').eq('driver_id', driverId).maybeSingle();
     if (prof?.user_id) {
-      await supabase.from('notifications').insert({ user_id: prof.user_id, driver_id: driverId, channel: 'in_app', title: 'Training Assigned', body: `${crs?.title} has been assigned to you.` });
+      await supabase.from('notifications').insert({
+        user_id: prof.user_id,
+        driver_id: driverId,
+        channel: 'in_app',
+        title: 'Training & Exam Assigned',
+        body: `${crs?.title} and evaluation exam have been assigned to you.`,
+      });
     }
-    toast({ title: 'Training assigned' });
+
+    toast({
+      title: 'Training Assigned',
+      description: finalExamId ? 'Course and Evaluation Exam linked successfully.' : 'Course assigned to driver.',
+    });
+
     onOpenChange(false);
-    setDriverId(''); setCourseId(''); setDueDate('');
+    setDriverId(''); setCourseId(''); setDueDate(''); setExistingExam(null);
     onSaved();
   }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader><DialogTitle>Assign Training</DialogTitle><DialogDescription>Manually assign a course to a driver.</DialogDescription></DialogHeader>
-        <div className="grid gap-3">
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Assign Training Course</DialogTitle>
+          <DialogDescription>Assign a course to a driver with evaluation exam options.</DialogDescription>
+        </DialogHeader>
+
+        <div className="grid gap-4 py-2">
           <div>
-            <Label className="text-xs">Driver</Label>
+            <Label className="text-xs font-semibold">Select Driver</Label>
             <Select value={driverId} onValueChange={setDriverId}>
-              <SelectTrigger><SelectValue placeholder="Select driver" /></SelectTrigger>
+              <SelectTrigger className="mt-1"><SelectValue placeholder="Select driver" /></SelectTrigger>
               <SelectContent>{drivers.map((d) => <SelectItem key={d.id} value={d.id}>{d.full_name} ({d.employee_id})</SelectItem>)}</SelectContent>
             </Select>
           </div>
+
           <div>
-            <Label className="text-xs">Course</Label>
+            <Label className="text-xs font-semibold">Select Course</Label>
             <Select value={courseId} onValueChange={setCourseId}>
-              <SelectTrigger><SelectValue placeholder="Select course" /></SelectTrigger>
+              <SelectTrigger className="mt-1"><SelectValue placeholder="Select course" /></SelectTrigger>
               <SelectContent>{courses.map((c) => <SelectItem key={c.id} value={c.id}>{c.title}</SelectItem>)}</SelectContent>
             </Select>
           </div>
+
+          {/* Evaluation Exam Section */}
+          {courseId && (
+            <div className="rounded-xl border border-primary/20 bg-primary/5 p-3.5 space-y-3">
+              <div className="flex items-center justify-between">
+                <Label className="text-xs font-bold text-primary flex items-center gap-1.5">
+                  <Sparkles className="h-4 w-4 text-amber-500" /> Evaluation Exam Options
+                </Label>
+                {checkingExam && <span className="text-[10px] text-muted-foreground animate-pulse">Checking...</span>}
+              </div>
+
+              {existingExam ? (
+                <div className="flex items-center gap-2 rounded-lg bg-card p-2.5 border text-xs">
+                  <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+                  <div>
+                    <p className="font-bold text-foreground">{existingExam.title}</p>
+                    <p className="text-[10px] text-muted-foreground">Linked Exam · Pass: {existingExam.pass_percentage}% · Time: {existingExam.time_limit_minutes ?? 30}m</p>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-3 pt-1">
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      id="autoExamToggle"
+                      checked={autoCreateExam}
+                      onChange={(e) => setAutoCreateExam(e.target.checked)}
+                      className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary accent-primary"
+                    />
+                    <label htmlFor="autoExamToggle" className="text-xs font-semibold cursor-pointer">
+                      Auto-create evaluation exam for this course
+                    </label>
+                  </div>
+
+                  {autoCreateExam && (
+                    <div className="space-y-2 pt-1 border-t border-primary/10">
+                      <div>
+                        <Label className="text-[11px] text-muted-foreground">Exam Title</Label>
+                        <Input
+                          value={examTitle}
+                          onChange={(e) => setExamTitle(e.target.value)}
+                          placeholder="Exam title..."
+                          className="mt-0.5 h-8 text-xs bg-card"
+                        />
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <Label className="text-[11px] text-muted-foreground">Pass Mark (%)</Label>
+                          <Input
+                            type="number"
+                            value={passPercentage}
+                            onChange={(e) => setPassPercentage(e.target.value)}
+                            className="mt-0.5 h-8 text-xs bg-card"
+                          />
+                        </div>
+                        <div>
+                          <Label className="text-[11px] text-muted-foreground">Time Limit (mins)</Label>
+                          <Input
+                            type="number"
+                            value={timeLimit}
+                            onChange={(e) => setTimeLimit(e.target.value)}
+                            className="mt-0.5 h-8 text-xs bg-card"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
           <div>
-            <Label className="text-xs">Due Date (optional)</Label>
+            <Label className="text-xs font-semibold">Due Date (optional)</Label>
             <DatePicker value={dueDate} onChange={setDueDate} />
           </div>
         </div>
-        <DialogFooter><Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button><Button onClick={save} disabled={saving}>Assign</Button></DialogFooter>
+
+        <DialogFooter className="pt-2">
+          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button onClick={save} disabled={saving}>
+            {saving ? 'Assigning...' : 'Assign Course & Exam'}
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

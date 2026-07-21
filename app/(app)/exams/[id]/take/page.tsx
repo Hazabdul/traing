@@ -14,6 +14,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { AlertCircle, Clock, CheckCircle2, XCircle, ArrowLeft, AlertTriangle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { logAudit } from '@/lib/audit';
+import { fetchExamDetailById } from '@/lib/exam-service';
 
 interface ExamData {
   exam: Exam;
@@ -36,19 +37,17 @@ export default function TakeExamPage() {
 
   const load = useCallback(async () => {
     const examId = params.id;
-    const { data: ex } = await supabase.from('exams').select('*, course:courses(*)').eq('id', examId).maybeSingle();
+    setLoading(true);
+    const { exam: ex, attachedQuestions: questions } = await fetchExamDetailById(examId);
+
     if (!ex) { setLoading(false); return; }
-    const { data: eq } = await supabase.from('exam_questions').select('question_id').eq('exam_id', examId);
-    const qIds = (eq ?? []).map((x: { question_id: string }) => x.question_id);
-    let questions: Question[] = [];
-    if (qIds.length) {
-      const { data: qs } = await supabase.from('questions').select('*').in('id', qIds);
-      questions = (qs ?? []) as Question[];
-      if (ex.randomize_questions) {
-        questions = [...questions].sort(() => Math.random() - 0.5);
-      }
+
+    let finalQs = questions;
+    if (ex.randomize_questions) {
+      finalQs = [...questions].sort(() => Math.random() - 0.5);
     }
-    setExam({ exam: ex as Exam & { course: Course }, course: (ex as Exam & { course: Course }).course, questions });
+
+    setExam({ exam: ex as Exam & { course: Course }, course: ex.course ?? null, questions: finalQs });
     setTimeLeft((ex as Exam).time_limit_minutes ?? 30);
     setLoading(false);
   }, [params.id]);

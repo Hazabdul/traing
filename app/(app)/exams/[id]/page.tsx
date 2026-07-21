@@ -22,7 +22,7 @@ import { ArrowLeft, Plus, Trash2, HelpCircle, Save, CheckCircle2, Clock } from '
 import { QUESTION_TYPE_LABELS, DIFFICULTY_LABELS } from '@/lib/constants';
 import { useToast } from '@/hooks/use-toast';
 import { logAudit } from '@/lib/audit';
-import { updateExamRecord, addQuestionToExamRecord, removeQuestionFromExamRecord } from '@/lib/exam-service';
+import { updateExamRecord, addQuestionToExamRecord, removeQuestionFromExamRecord, fetchExamDetailById } from '@/lib/exam-service';
 
 export default function ManageExamPage() {
   const router = useRouter();
@@ -53,8 +53,8 @@ export default function ManageExamPage() {
     const examId = params.id;
     setLoading(true);
 
-    const [{ data: ex }, { data: c }] = await Promise.all([
-      supabase.from('exams').select('*').eq('id', examId).maybeSingle(),
+    const [{ exam: ex, attachedQuestions: attached, availableQuestions: available }, { data: c }] = await Promise.all([
+      fetchExamDetailById(examId),
       supabase.from('courses').select('*').order('title'),
     ]);
 
@@ -64,7 +64,7 @@ export default function ManageExamPage() {
       return;
     }
 
-    setExam(ex as Exam);
+    setExam(ex);
     setCourses((c ?? []) as Course[]);
 
     setTitle(ex.title);
@@ -74,28 +74,6 @@ export default function ManageExamPage() {
     setTimeLimit(String(ex.time_limit_minutes ?? 30));
     setIsActive(ex.is_active ?? true);
     setRandomize(ex.randomize_questions ?? false);
-
-    // Fetch attached questions
-    const { data: eq } = await supabase
-      .from('exam_questions')
-      .select('question_id, question_order')
-      .eq('exam_id', examId)
-      .order('question_order');
-
-    const qIds = (eq ?? []).map((x: { question_id: string }) => x.question_id);
-
-    let attached: Question[] = [];
-    if (qIds.length > 0) {
-      const { data: qs } = await supabase.from('questions').select('*').in('id', qIds);
-      // Sort by order in exam_questions
-      const qMap = new Map((qs ?? []).map((q: Question) => [q.id, q]));
-      attached = qIds.map((id: string) => qMap.get(id)).filter(Boolean) as Question[];
-    }
-
-    // Fetch all questions for bank
-    const { data: allQs } = await supabase.from('questions').select('*').order('created_at', { ascending: false });
-    const attachedSet = new Set(qIds);
-    const available = ((allQs ?? []) as Question[]).filter((q) => !attachedSet.has(q.id));
 
     setAttachedQuestions(attached);
     setAvailableQuestions(available);

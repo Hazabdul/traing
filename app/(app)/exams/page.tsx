@@ -22,7 +22,7 @@ import { ClipboardCheck, Clock, CheckCircle2, XCircle, Play, Plus, Settings } fr
 import { formatDateTime } from '@/lib/format';
 import { useToast } from '@/hooks/use-toast';
 import { logAudit } from '@/lib/audit';
-import { createExamRecord } from '@/lib/exam-service';
+import { createExamRecord, fetchAllExams } from '@/lib/exam-service';
 
 export default function ExamsPage() {
   const { profile } = useAuth();
@@ -45,14 +45,11 @@ export default function ExamsPage() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [{ data: e }, { data: eq }, { data: c }] = await Promise.all([
-      supabase.from('exams').select('*, course:courses(*)').order('title'),
-      supabase.from('exam_questions').select('exam_id, question_id'),
+    const [allEx, { data: c }] = await Promise.all([
+      fetchAllExams(),
       supabase.from('courses').select('*').order('title'),
     ]);
-    const countMap = new Map<string, number>();
-    (eq ?? []).forEach((x: { exam_id: string }) => countMap.set(x.exam_id, (countMap.get(x.exam_id) ?? 0) + 1));
-    setExams((e ?? []).map((ex: Exam & { course: Course }) => ({ ...ex, questionCount: countMap.get(ex.id) ?? 0 })));
+    setExams(allEx);
     setCourses((c ?? []) as Course[]);
 
     // Load attempts for current driver
