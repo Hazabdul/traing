@@ -432,28 +432,6 @@ export default function AdvancedAssignmentsPage() {
           />
         </div>
 
-        {/* Status tabs as small filter pills */}
-        <div className="flex items-center gap-1 bg-muted/60 p-1 rounded-lg">
-          {([
-            { key: 'all', label: 'All', count: stats.total },
-            { key: 'pending', label: 'Pending', count: stats.pending },
-            { key: 'overdue', label: 'Overdue', count: stats.overdue },
-            { key: 'completed', label: 'Done', count: stats.completed },
-            { key: 'failed', label: 'Failed', count: stats.failed },
-          ] as const).map((t) => (
-            <button
-              key={t.key}
-              onClick={() => setActiveTab(t.key)}
-              className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-colors ${
-                activeTab === t.key
-                  ? 'bg-background shadow text-foreground'
-                  : 'text-muted-foreground hover:text-foreground'
-              }`}
-            >
-              {t.label} {t.count > 0 && <span className="opacity-60">({t.count})</span>}
-            </button>
-          ))}
-        </div>
 
         <Select value={courseFilter} onValueChange={setCourseFilter}>
           <SelectTrigger className="w-[160px] h-9 text-xs"><SelectValue placeholder="All Courses" /></SelectTrigger>
