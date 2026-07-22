@@ -141,6 +141,7 @@ export default function DriversPage() {
 
       await logAudit('delete', 'driver', `Deleted driver: ${deleteTarget.name} (${deleteTarget.empId})`);
       toast({ title: 'Driver deleted successfully' });
+      setDrivers((prev) => prev.filter((d) => d.id !== driverId));
       setDeleteTarget(null);
       load();
     } catch (err: any) {
