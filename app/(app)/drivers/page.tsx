@@ -14,9 +14,14 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { DriverFormDialog } from '@/components/driver-form-dialog';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import type { ColumnDef } from '@tanstack/react-table';
-import { Plus, Eye, Star } from 'lucide-react';
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
+} from '@/components/ui/dialog';
+import { Plus, Eye, Star, Trash2, AlertTriangle } from 'lucide-react';
 import { RATING_BAND_COLORS, DRIVER_STATUS_COLORS, DRIVER_STATUS_LABELS } from '@/lib/constants';
 import { exportToCSV } from '@/lib/export';
+import { useToast } from '@/hooks/use-toast';
+import { logAudit } from '@/lib/audit';
 
 interface DriverRow extends Driver {
   branch_name?: string | null;
@@ -36,6 +41,11 @@ export default function DriversPage() {
   const [branchFilter, setBranchFilter] = useState<string>('all');
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<Driver | null>(null);
+  const { toast } = useToast();
+
+  // Delete Driver modal state
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string; empId: string } | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -85,6 +95,38 @@ export default function DriversPage() {
       })),
       'drivers.csv'
     );
+  }
+
+  async function handleDeleteDriver() {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    const driverId = deleteTarget.id;
+
+    // Delete related records first to prevent foreign key errors
+    await Promise.all([
+      supabase.from('trainings').delete().eq('driver_id', driverId),
+      supabase.from('certificates').delete().eq('driver_id', driverId),
+      supabase.from('driver_documents').delete().eq('driver_id', driverId),
+      supabase.from('accidents').delete().eq('driver_id', driverId),
+      supabase.from('violations').delete().eq('driver_id', driverId),
+      supabase.from('safety_warnings').delete().eq('driver_id', driverId),
+      supabase.from('behaviour_assessments').delete().eq('driver_id', driverId),
+      supabase.from('driver_ratings').delete().eq('driver_id', driverId),
+      supabase.from('exam_attempts').delete().eq('driver_id', driverId),
+    ]);
+
+    const { error } = await supabase.from('drivers').delete().eq('id', driverId);
+    setDeleting(false);
+
+    if (error) {
+      toast({ title: 'Failed to delete driver', description: error.message, variant: 'destructive' });
+      return;
+    }
+
+    await logAudit('delete', 'driver', `Deleted driver: ${deleteTarget.name} (${deleteTarget.empId})`);
+    toast({ title: 'Driver deleted successfully' });
+    setDeleteTarget(null);
+    load();
   }
 
   const columns: ColumnDef<DriverRow>[] = useMemo(() => [
@@ -163,12 +205,27 @@ export default function DriversPage() {
       header: '',
       enableSorting: false,
       cell: ({ row }) => (
-        <div className="flex justify-end">
+        <div className="flex justify-end gap-1">
           <Button asChild size="sm" variant="ghost" className="h-8 gap-1">
             <Link href={`/drivers/${row.original.id}`}>
               <Eye className="h-4 w-4" /> View
             </Link>
           </Button>
+          {canEdit && (
+            <Button
+              size="icon"
+              variant="ghost"
+              className="h-8 w-8 text-destructive hover:bg-destructive/10"
+              title="Delete Driver"
+              onClick={() => setDeleteTarget({
+                id: row.original.id,
+                name: row.original.full_name,
+                empId: row.original.employee_id,
+              })}
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          )}
         </div>
       ),
     },
@@ -246,6 +303,29 @@ export default function DriversPage() {
         plants={plants}
         onSaved={load}
       />
+
+      {/* Delete Driver Confirmation Modal */}
+      <Dialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-destructive/10 text-destructive mb-2">
+              <AlertTriangle className="h-6 w-6" />
+            </div>
+            <DialogTitle className="text-center">Delete Driver Record</DialogTitle>
+            <DialogDescription className="text-center text-xs">
+              Are you sure you want to delete driver <strong>"{deleteTarget?.name}"</strong> ({deleteTarget?.empId})?
+              This will permanently remove the driver profile along with their training records, certificates, and safety history.
+            </DialogDescription>
+          </DialogHeader>
+
+          <DialogFooter className="gap-2 sm:gap-0 mt-4">
+            <Button variant="outline" size="sm" onClick={() => setDeleteTarget(null)}>Cancel</Button>
+            <Button variant="destructive" size="sm" disabled={deleting} onClick={handleDeleteDriver}>
+              {deleting ? 'Deleting...' : 'Yes, Delete Driver'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

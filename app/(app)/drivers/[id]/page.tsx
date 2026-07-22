@@ -59,6 +59,8 @@ export default function DriverDetailPage({ params }: { params: { id: string } })
   const { toast } = useToast();
   const [data, setData] = useState<DriverDetailData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [accModal, setAccModal] = useState(false);
   const [vioModal, setVioModal] = useState(false);
   const [warnModal, setWarnModal] = useState(false);
@@ -115,6 +117,37 @@ export default function DriverDetailPage({ params }: { params: { id: string } })
     await load();
     toast({ title: 'Rating recalculated', description: 'Driver rating updated.' });
     await logAudit('update', 'driver_rating', `Recalculated rating for ${data?.driver.employee_id}`, {}, params.id);
+  }
+
+  async function handleDeleteDriver() {
+    if (!data?.driver) return;
+    setDeleting(true);
+    const driverId = data.driver.id;
+
+    // Delete related records first to prevent foreign key errors
+    await Promise.all([
+      supabase.from('trainings').delete().eq('driver_id', driverId),
+      supabase.from('certificates').delete().eq('driver_id', driverId),
+      supabase.from('driver_documents').delete().eq('driver_id', driverId),
+      supabase.from('accidents').delete().eq('driver_id', driverId),
+      supabase.from('violations').delete().eq('driver_id', driverId),
+      supabase.from('safety_warnings').delete().eq('driver_id', driverId),
+      supabase.from('behaviour_assessments').delete().eq('driver_id', driverId),
+      supabase.from('driver_ratings').delete().eq('driver_id', driverId),
+      supabase.from('exam_attempts').delete().eq('driver_id', driverId),
+    ]);
+
+    const { error } = await supabase.from('drivers').delete().eq('id', driverId);
+    setDeleting(false);
+
+    if (error) {
+      toast({ title: 'Failed to delete driver', description: error.message, variant: 'destructive' });
+      return;
+    }
+
+    await logAudit('delete', 'driver', `Deleted driver: ${data.driver.full_name} (${data.driver.employee_id})`);
+    toast({ title: 'Driver deleted successfully' });
+    router.push('/drivers');
   }
 
   if (loading) {
@@ -178,9 +211,14 @@ export default function DriverDetailPage({ params }: { params: { id: string } })
               </div>
             </div>
             {canEdit && (
-              <Button variant="outline" size="sm" onClick={recomputeRating} className="gap-1">
-                <RefreshCw className="h-4 w-4" /> Recalculate Rating
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button variant="outline" size="sm" onClick={recomputeRating} className="gap-1">
+                  <RefreshCw className="h-4 w-4" /> Recalculate Rating
+                </Button>
+                <Button variant="destructive" size="sm" onClick={() => setDeleteDialogOpen(true)} className="gap-1">
+                  <Trash2 className="h-4 w-4" /> Delete Driver
+                </Button>
+              </div>
             )}
           </div>
         </CardContent>
@@ -555,6 +593,29 @@ export default function DriverDetailPage({ params }: { params: { id: string } })
       <ViolationModal open={vioModal} onOpenChange={setVioModal} driverId={driver.id} onSaved={load} />
       <WarningModal open={warnModal} onOpenChange={setWarnModal} driverId={driver.id} onSaved={load} />
       <BehaviourModal open={behModal} onOpenChange={setBehModal} driverId={driver.id} onSaved={load} />
+
+      {/* Delete Driver Confirmation Modal */}
+      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-destructive/10 text-destructive mb-2">
+              <AlertTriangle className="h-6 w-6" />
+            </div>
+            <DialogTitle className="text-center">Delete Driver Record</DialogTitle>
+            <DialogDescription className="text-center text-xs">
+              Are you sure you want to delete driver <strong>"{driver.full_name}"</strong> ({driver.employee_id})?
+              This will permanently remove the driver profile along with their training records, certificates, and safety history.
+            </DialogDescription>
+          </DialogHeader>
+
+          <DialogFooter className="gap-2 sm:gap-0 mt-4">
+            <Button variant="outline" size="sm" onClick={() => setDeleteDialogOpen(false)}>Cancel</Button>
+            <Button variant="destructive" size="sm" disabled={deleting} onClick={handleDeleteDriver}>
+              {deleting ? 'Deleting...' : 'Yes, Delete Driver'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
