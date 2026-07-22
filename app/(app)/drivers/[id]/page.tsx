@@ -124,30 +124,51 @@ export default function DriverDetailPage({ params }: { params: { id: string } })
     setDeleting(true);
     const driverId = data.driver.id;
 
-    // Delete related records first to prevent foreign key errors
-    await Promise.all([
-      supabase.from('trainings').delete().eq('driver_id', driverId),
-      supabase.from('certificates').delete().eq('driver_id', driverId),
-      supabase.from('driver_documents').delete().eq('driver_id', driverId),
-      supabase.from('accidents').delete().eq('driver_id', driverId),
-      supabase.from('violations').delete().eq('driver_id', driverId),
-      supabase.from('safety_warnings').delete().eq('driver_id', driverId),
-      supabase.from('behaviour_assessments').delete().eq('driver_id', driverId),
-      supabase.from('driver_ratings').delete().eq('driver_id', driverId),
-      supabase.from('exam_attempts').delete().eq('driver_id', driverId),
-    ]);
+    try {
+      // 1. Unlink profiles
+      await supabase.from('profiles').update({ driver_id: null }).eq('driver_id', driverId);
 
-    const { error } = await supabase.from('drivers').delete().eq('id', driverId);
-    setDeleting(false);
+      // 2. Clear dependent records safely using ID list matching
+      const tables = [
+        'notifications',
+        'trainings',
+        'certificates',
+        'driver_documents',
+        'accidents',
+        'violations',
+        'safety_warnings',
+        'behaviour_assessments',
+        'driver_ratings',
+        'exam_attempts',
+      ];
 
-    if (error) {
-      toast({ title: 'Failed to delete driver', description: error.message, variant: 'destructive' });
-      return;
+      for (const tableName of tables) {
+        const { data: rows } = await supabase.from(tableName).select('id').eq('driver_id', driverId);
+        if (rows && rows.length > 0) {
+          const ids = rows.map((r: any) => r.id).filter(Boolean);
+          if (ids.length > 0) {
+            await supabase.from(tableName).delete().in('id', ids);
+          }
+        }
+      }
+
+      // 3. Delete driver record
+      const { error } = await supabase.from('drivers').delete().eq('id', driverId);
+
+      if (error) {
+        setDeleting(false);
+        toast({ title: 'Failed to delete driver', description: error.message, variant: 'destructive' });
+        return;
+      }
+
+      await logAudit('delete', 'driver', `Deleted driver: ${data.driver.full_name} (${data.driver.employee_id})`);
+      toast({ title: 'Driver deleted successfully' });
+      router.push('/drivers');
+    } catch (err: any) {
+      toast({ title: 'Delete error', description: err.message ?? 'Unknown error occurred', variant: 'destructive' });
+    } finally {
+      setDeleting(false);
     }
-
-    await logAudit('delete', 'driver', `Deleted driver: ${data.driver.full_name} (${data.driver.employee_id})`);
-    toast({ title: 'Driver deleted successfully' });
-    router.push('/drivers');
   }
 
   if (loading) {
